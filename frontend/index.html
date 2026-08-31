@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Axiom</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'] },
+          colors: {
+            // Build 7 — Axiom Sugar theme: point the palette the app already
+            // uses (ink/paper + Tailwind's neutral/red/amber/emerald/white) at
+            // our CSS custom properties (frontend/css/theme.css) so nearly
+            // every existing utility class themes for free in light + dark,
+            // with no markup churn. See DESIGN.md §2 and §6.
+            ink: 'var(--text)',
+            paper: 'var(--bg)',
+            primary: 'var(--primary)',
+            grape: 'var(--primary)',
+            mint: 'var(--mint)',
+            peach: 'var(--peach)',
+            sky: 'var(--sky)',
+            lilac: 'var(--lilac)',
+            lemon: 'var(--lemon)',
+            white: 'var(--surface)',
+            neutral: {
+              50: 'var(--surface-2)',
+              100: 'var(--surface-3)',
+              200: 'var(--border)',
+              300: 'var(--border-strong)',
+              400: 'var(--text-subtle)',
+              500: 'var(--text-subtle)',
+              600: 'var(--text-muted)',
+              700: 'var(--text-muted)',
+              800: 'var(--text)',
+              900: 'var(--text)',
+            },
+            red: {
+              50: 'var(--danger-c)',
+              100: 'var(--danger-c)',
+              200: 'var(--danger)',
+              300: 'var(--danger)',
+              500: 'var(--danger)',
+              600: 'var(--danger)',
+              700: 'var(--on-danger-c)',
+            },
+            amber: {
+              50: 'var(--lemon-c)',
+              100: 'var(--lemon-c)',
+              200: 'var(--warning)',
+              400: 'var(--warning)',
+              500: 'var(--warning)',
+              700: 'var(--on-lemon-c)',
+              800: 'var(--on-lemon-c)',
+            },
+            emerald: {
+              50: 'var(--success-c)',
+              100: 'var(--success-c)',
+              200: 'var(--success)',
+              300: 'var(--success)',
+              400: 'var(--success)',
+              500: 'var(--success)',
+              600: 'var(--success)',
+              700: 'var(--on-mint-c)',
+              800: 'var(--on-mint-c)',
+            },
+          },
+        },
+      },
+    };
+  </script>
+  <script>
+    // No-flash theme bootstrap: applied synchronously (before first paint) so
+    // a reload never flashes the wrong theme. Mirrors applyTheme()/getTheme()
+    // in app.js — kept independent here since app.js loads after body content.
+    (function () {
+      try {
+        var t = localStorage.getItem('axiom_theme') || 'system';
+        var dark = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme:dark)').matches);
+        document.documentElement.classList.toggle('dark', dark);
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+  <!-- jsPDF: used only to export a note WITH the user's reader annotations baked in
+       (window.jspdf.jsPDF). If it fails to load, the reader download falls back to the
+       clean original PDF. -->
+  <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+  <link rel="stylesheet" href="/css/theme.css" />
+  <link rel="stylesheet" href="/css/reader.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/web/pdf_viewer.css" />
+  <script type="module">
+    // Immersive PDF reader (custom canvas rebuild): load PDF.js's core
+    // library as an ES module and expose it on window so the classic
+    // (non-module) app.js can use it — getDocument() to load the file,
+    // page.render() to draw each page's canvas up front, and its text-layer
+    // API (TextLayer class / renderTextLayer function, whichever this build
+    // exposes — probed at runtime in app.js) for selectable text. No viewer
+    // *component* (PDFViewer/EventBus/PDFLinkService) is used any more — our
+    // own render-every-page-up-front loop replaced it (virtualized on-demand
+    // rendering caused a scroll jitter). pdf_viewer.css (linked above) is
+    // still needed for the text layer's span/selection styling.
+    // app.js's openReader() polls briefly for window.__pdfjs in case this
+    // module script hasn't finished loading yet on a slow connection.
+    import * as pdfjsLib from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/build/pdf.min.mjs';
+    // TextLayerBuilder (a viewer component) — NOT the raw TextLayer class: the
+    // builder also creates the `.endOfContent` element and wires the `.selecting`
+    // drag toggle, which is what constrains native text selection. The raw
+    // TextLayer class omits both, which made a partial drag select ALL the text.
+    import { TextLayerBuilder } from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/web/pdf_viewer.mjs';
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/build/pdf.worker.min.mjs';
+    window.__pdfjs = { lib: pdfjsLib, TextLayerBuilder };
+  </script>
+  <style>
+    /* Left sidebar nav rows (Build 6, Step 3) — plain CSS rather than Tailwind
+       utility classes so the active/hover states are simple to toggle from JS
+       (classList.toggle('active', ...)) without juggling long class strings. */
+    .sidebar-nav-item {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      border-radius: 0.6rem;
+      border: none;
+      background: none;
+      padding: 0.5rem 0.625rem;
+      font-family: inherit;
+      font-size: 0.875rem;
+      font-weight: 500;
+      line-height: 1.25rem;
+      color: var(--text-muted);
+      text-align: left;
+      cursor: pointer;
+      transition: background-color .15s ease, color .15s ease;
+    }
+    .sidebar-nav-item { padding: 0.6rem 0; }
+    .sidebar-nav-item svg { flex-shrink: 0; }
+    .sidebar-nav-item span { display: none; } /* icon-only rail */
+    .sidebar-nav-item:hover { background-color: var(--surface-2); color: var(--text); }
+    .sidebar-nav-item.active { background-color: var(--surface-2); color: var(--text); }
+  </style>
+</head>
+<body class="min-h-screen bg-paper text-ink antialiased">
+  <div class="flex min-h-screen">
+    <aside id="sidebar" class="sticky top-0 flex h-screen w-16 shrink-0 flex-col border-r border-neutral-200 bg-white px-2 py-4">
+      <button data-action="home" title="Home" class="mb-6 flex justify-center py-1">
+        <span class="badge-brand flex h-9 w-9 items-center justify-center rounded-xl text-sm font-bold">A</span>
+      </button>
+      <nav class="flex flex-col gap-1">
+        <button data-action="home" data-nav="home" class="sidebar-nav-item">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5L12 4l8 6.5"/><path d="M6 9.5V19a1 1 0 001 1h3v-5a2 2 0 012-2 2 2 0 012 2v5h3a1 1 0 001-1V9.5"/></svg>
+          <span>Home</span>
+        </button>
+        <button data-action="go-courses" data-nav="courses" class="sidebar-nav-item">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h6a4 4 0 014 4v13a3 3 0 00-3-3H2z"/><path d="M22 4h-6a4 4 0 00-4 4v13a3 3 0 013-3h7z"/></svg>
+          <span>Courses</span>
+        </button>
+        <button data-action="open-pomodoro" data-nav="pomodoro" class="sidebar-nav-item">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M9 2h6"/></svg>
+          <span>Pomodoro</span>
+        </button>
+        <button data-action="go-settings" data-nav="settings" class="sidebar-nav-item">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M21 12h-2.5M5.5 12H3M18.36 5.64l-1.77 1.77M7.41 16.59l-1.77 1.77M18.36 18.36l-1.77-1.77M7.41 7.41L5.64 5.64"/></svg>
+          <span>Settings</span>
+        </button>
+      </nav>
+      <div class="flex-1"></div>
+      <div id="sidebar-bottom" class="border-t border-neutral-200 pt-3">
+        <button data-action="show-health" id="health-pill" title="System status"
+          class="mb-2 flex w-full items-center justify-center rounded-lg py-2 hover:bg-neutral-50">
+          <span class="h-2.5 w-2.5 rounded-full bg-neutral-300"></span>
+        </button>
+        <div id="sidebar-user"></div>
+      </div>
+    </aside>
+    <div class="flex-1 min-w-0">
+      <main id="view" class="mx-auto max-w-5xl px-6 py-10"></main>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/ui.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
