@@ -1,0 +1,471 @@
+/* Axiom "Sugar" theme — design tokens + dark mode + candy component classes.
+   Source of truth: frontend/DESIGN.md §2–§7 (Build 7, Phase 1).
+   Every component below reads ONLY custom properties so light/dark both work
+   without duplicating rules — .dark on <html> just redefines the vars. */
+
+/* ---------- 1. Tokens: light (:root) ---------- */
+:root {
+  color-scheme: light;
+
+  /* brand + accents */
+  --primary:            #7A5AF8;
+  --primary-hover:      #6B46E5;
+  --primary-press:      #5D39D6;
+  --on-primary:         #FFFFFF;
+  --primary-container:  #EDE7FF;
+  --on-primary-container:#3A2A8C;
+  --ring:               rgba(122,90,248,.45);
+
+  --mint:  #12B886;  --mint-c:  #D7F7EC;  --on-mint-c:  #0A6B50;
+  --peach: #FF7A59;  --peach-c: #FFE6DC;  --on-peach-c: #B23A1E;
+  --sky:   #3AB6F0;  --sky-c:   #DCF1FD;  --on-sky-c:   #0B6390;
+  --lilac: #C77DFF;  --lilac-c: #F3E4FF;  --on-lilac-c: #7A2FB0;
+  --lemon: #F2B705;  --lemon-c: #FFF3CC;  --on-lemon-c: #8A6400;
+
+  /* semantic */
+  --success: #12B886; --success-c:#D7F7EC;
+  --danger:  #F0475B; --danger-c: #FDE2E6; --on-danger-c:#A31427;
+  --warning: #F59F00; --warning-c:#FFF0D6;
+  --info:    #3AB6F0; --info-c:   #DCF1FD;
+
+  /* neutrals / surfaces (warm plum-tinted) */
+  --bg:         #FAF8FF;
+  --surface:    #FFFFFF;
+  --surface-2:  #F4F1FB;
+  --surface-3:  #EBE6F5;
+  --border:     #ECE7F3;
+  --border-strong:#DDD5EB;
+  --text:       #1F1B2E;
+  --text-muted: #625C71;
+  --text-subtle:#948DA6;
+
+  /* shadows (candy, layered) */
+  --shadow-sm: 0 1px 2px rgba(31,27,46,.06), 0 1px 3px rgba(31,27,46,.05);
+  --shadow-md: 0 4px 14px rgba(31,27,46,.09), 0 2px 6px rgba(31,27,46,.05);
+  --shadow-lg: 0 16px 40px rgba(31,27,46,.14), 0 6px 14px rgba(31,27,46,.08);
+  --shadow-primary: 0 8px 22px rgba(122,90,248,.34);
+
+  /* shape */
+  --r-sm: 10px; --r-md: 14px; --r-lg: 20px; --r-xl: 28px; --r-2xl: 32px; --r-pill: 999px;
+
+  /* motion */
+  --ease-spring: cubic-bezier(.2,.8,.2,1);
+  --ease-out:    cubic-bezier(.16,1,.3,1);
+  --dur-fast: 120ms; --dur: 200ms; --dur-slow: 320ms;
+}
+
+/* ---------- 1b. Tokens: dark (:root.dark) ---------- */
+:root.dark {
+  color-scheme: dark;
+
+  --primary:            #9B84FF;
+  --primary-hover:      #AC97FF;
+  --primary-press:      #8A70FF;
+  --on-primary:         #1A1230;
+  --primary-container:  #2E2350;
+  --on-primary-container:#D8CCFF;
+  --ring:               rgba(155,132,255,.50);
+
+  --mint-c:#0E3A2C; --on-mint-c:#7DE7C4;
+  --peach-c:#4A241A; --on-peach-c:#FFB59E;
+  --sky-c:#0C3245; --on-sky-c:#A6DEFA;
+  --lilac-c:#3A234A; --on-lilac-c:#E4BCFF;
+  --lemon-c:#3E3007; --on-lemon-c:#F2D785;
+  --danger:#FF6B7A; --danger-c:#3E1620; --on-danger-c:#FFB9C1;
+  --success:#3FD6A4; --warning:#FFC24D; --info:#5BC4F5;
+  /* Container tints for dark — without these, --success-c/--warning-c/--info-c
+     keep their LIGHT values, so emerald/success surfaces (done buttons, active
+     saved-prompt cards, quiz-correct) render light-on-light and unreadable. */
+  --success-c:#0E3A2C; --warning-c:#3E3007; --info-c:#0C3245;
+
+  --bg:         #141019;
+  --surface:    #1E1826;
+  --surface-2:  #271F31;
+  --surface-3:  #322842;
+  --border:     #332A40;
+  --border-strong:#43384F;
+  --text:       #F3EFFA;
+  --text-muted: #B4A9C6;
+  --text-subtle:#877C99;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.40);
+  --shadow-md: 0 6px 18px rgba(0,0,0,.45);
+  --shadow-lg: 0 20px 46px rgba(0,0,0,.55);
+  --shadow-primary: 0 8px 24px rgba(122,90,248,.45);
+}
+
+/* ---------- 2. Base ---------- */
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* ---------- 3. Keyframes ---------- */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeSwap {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ---------- 4. Component classes ---------- */
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  border-radius: var(--r-md);
+  font-weight: 600;
+  font-size: .875rem;
+  line-height: 1.25rem;
+  padding: .55rem 1rem;
+  border: 1px solid transparent;
+  cursor: pointer;
+  user-select: none;
+  transition: transform var(--dur) var(--ease-spring),
+              box-shadow var(--dur) var(--ease-spring),
+              background-color var(--dur) var(--ease-spring),
+              color var(--dur) var(--ease-spring),
+              border-color var(--dur) var(--ease-spring);
+}
+.btn:active { transform: scale(.97); }
+.btn:disabled, .btn[disabled] { opacity: .5; pointer-events: none; }
+.btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
+
+.btn-primary {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+.btn-primary:hover {
+  background: var(--primary-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-primary);
+}
+.btn-primary:active { background: var(--primary-press); transform: scale(.97); }
+
+.btn-secondary {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border);
+}
+.btn-secondary:hover {
+  background: var(--surface-3);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-muted);
+  border-color: transparent;
+}
+.btn-ghost:hover { background: var(--surface-2); color: var(--text); }
+
+.btn-danger {
+  background: var(--danger-c);
+  color: var(--on-danger-c);
+}
+.btn-danger:hover { background: var(--danger); color: #FFFFFF; }
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--r-md);
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease-spring),
+              color var(--dur) var(--ease-spring),
+              transform var(--dur) var(--ease-spring);
+}
+.icon-btn:hover { background: var(--surface-2); color: var(--text); }
+.icon-btn:active { transform: scale(.97); }
+.icon-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
+.icon-btn:disabled, .icon-btn[disabled] { opacity: .5; pointer-events: none; }
+
+/* Cards */
+.card {
+  background: var(--surface);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border);
+  transition: transform var(--dur) var(--ease-spring),
+              box-shadow var(--dur) var(--ease-spring);
+}
+.card-interactive { cursor: pointer; }
+.card-interactive:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.card-interactive:active { transform: scale(.99); }
+
+/* Surfaces */
+.surface   { background: var(--surface); }
+.surface-2 { background: var(--surface-2); }
+.surface-3 { background: var(--surface-3); }
+
+/* Inputs (replaces the old inputCls) — applies to input/textarea/select via class */
+.field-input {
+  display: block;
+  width: 100%;
+  margin-top: .35rem; /* preserves the label→input gap the old inputCls's mt-1 gave */
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: .6rem .8rem;
+  color: var(--text);
+  font-size: .875rem;
+  line-height: 1.25rem;
+  transition: border-color var(--dur) var(--ease-spring),
+              box-shadow var(--dur) var(--ease-spring),
+              background-color var(--dur) var(--ease-spring);
+}
+.field-input::placeholder { color: var(--text-subtle); }
+.field-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+.field-input:disabled { opacity: .6; pointer-events: none; }
+select.field-input { cursor: pointer; }
+
+/* Chips + accent dots */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .15rem .6rem;
+  border-radius: var(--r-pill);
+  font-size: .75rem;
+  font-weight: 600;
+  line-height: 1.25rem;
+  white-space: nowrap;
+}
+.chip-grape { background: var(--primary-container); color: var(--on-primary-container); }
+.chip-mint  { background: var(--mint-c);  color: var(--on-mint-c); }
+.chip-peach { background: var(--peach-c); color: var(--on-peach-c); }
+.chip-sky   { background: var(--sky-c);   color: var(--on-sky-c); }
+.chip-lilac { background: var(--lilac-c); color: var(--on-lilac-c); }
+.chip-lemon { background: var(--lemon-c); color: var(--on-lemon-c); }
+
+.dot {
+  display: inline-block;
+  width: .5rem;
+  height: .5rem;
+  border-radius: var(--r-pill);
+  flex-shrink: 0;
+}
+.dot-grape { background: var(--primary); }
+.dot-mint  { background: var(--mint); }
+.dot-peach { background: var(--peach); }
+.dot-sky   { background: var(--sky); }
+.dot-lilac { background: var(--lilac); }
+.dot-lemon { background: var(--lemon); }
+
+/* Sidebar nav item (contract for later phases; also used as the token-based
+   fallback for the existing .sidebar-nav-item rows in index.html) */
+.nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: .625rem;
+  width: 100%;
+  border-radius: var(--r-md);
+  padding: .5rem .625rem;
+  color: var(--text-muted);
+  font-size: .875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease-spring),
+              color var(--dur) var(--ease-spring);
+}
+.nav-item::before {
+  content: '';
+  position: absolute;
+  left: -.625rem;
+  top: 15%;
+  bottom: 15%;
+  width: 3px;
+  border-radius: var(--r-pill);
+  background: var(--primary);
+  transform: scaleY(0);
+  transition: transform var(--dur) var(--ease-spring);
+}
+.nav-item:hover { background: var(--surface-2); color: var(--text); }
+.nav-item.active { background: var(--primary-container); color: var(--on-primary-container); }
+.nav-item.active::before { transform: scaleY(1); }
+
+/* Modals */
+.modal-card {
+  background: var(--surface);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-lg);
+  animation: rise var(--dur) var(--ease-out);
+}
+
+/* Toggle switch (dark mode + booleans) */
+.toggle {
+  --toggle-w: 2.5rem;
+  --toggle-h: 1.5rem;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: var(--toggle-w);
+  height: var(--toggle-h);
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color var(--dur) var(--ease-spring);
+}
+.toggle::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(var(--toggle-h) - 4px);
+  height: calc(var(--toggle-h) - 4px);
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--dur) var(--ease-spring);
+}
+.toggle.on, .toggle[aria-checked="true"] { background: var(--primary); }
+.toggle.on::before, .toggle[aria-checked="true"]::before {
+  transform: translateX(calc(var(--toggle-w) - var(--toggle-h)));
+}
+.toggle:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
+
+/* Text helpers */
+.text-ink    { color: var(--text); }
+.text-muted  { color: var(--text-muted); }
+.text-subtle { color: var(--text-subtle); }
+.link { color: var(--primary); text-decoration: none; cursor: pointer; }
+.link:hover { text-decoration: underline; }
+
+/* Empty state (dashed) */
+.dashed {
+  border: 1px dashed var(--border);
+  border-radius: var(--r-lg);
+  color: var(--text-subtle);
+  text-align: center;
+}
+
+/* Fixed brand badge (sidebar wordmark "A", initials-avatar fallback) — always
+   grape + on-primary text in BOTH themes. Deliberately does NOT use bg-ink/
+   text-white (those flip with the theme and invert this specific mark). */
+.badge-brand { background: var(--primary); color: var(--on-primary); }
+
+/* In-place content swap (dashboard List<->Calendar, Settings Saved-Prompts
+   patch): replays the fadeSwap keyframe each time it's re-added post-reflow
+   (see the classList remove/reflow/add dance in app.js). */
+.fade-swap { animation: fadeSwap var(--dur) var(--ease-out); }
+
+/* Entrance stagger for first-render grids/lists (index*40ms, capped ~240ms —
+   see riseDelayStyle() in app.js). */
+.rise-in { animation: rise var(--dur-slow) var(--ease-out) both; }
+
+/* ---------- 5. Auth screen: monogram, pill CTA, cursor-reactive background ----------
+   Source of truth: DESIGN.md §8 (auth) + §4 (motion) + §9 (reduced motion).
+   The animated background is AUTH-ONLY: mounted by showAuthGate()/mountAuthBg()
+   into #auth-bg-slot and torn down by enterApp() — it never appears in the app. */
+.auth-monogram {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: var(--r-xl);
+  background: linear-gradient(135deg, var(--primary), var(--lilac));
+  color: var(--on-primary);
+  font-weight: 700;
+  font-size: 1.375rem;
+  box-shadow: var(--shadow-primary);
+}
+
+/* Pill radius for the main auth CTA (DESIGN.md §3: "pill --r-pill for the main
+   auth CTA + FAB-like actions" — everything else on .btn stays --r-md). */
+.btn-pill { border-radius: var(--r-pill); }
+
+.auth-bg {
+  position: fixed; /* pin to the viewport so the animated background stays behind
+     the card at every scroll position — no un-animated gap appears when a tall
+     auth form scrolls. */
+  inset: 0;
+  overflow: hidden;
+  z-index: 0;
+  pointer-events: none;
+  /* Full-cover tinted base UNDER the drifting blobs, so the whole screen reads
+     colored/animated — no bare near-black band shows between/below the blobs.
+     Ends in --surface-2 (a soft tint, never pure black) as the floor color. */
+  background:
+    radial-gradient(120% 90% at 50% -10%, var(--primary-container) 0%, transparent 60%),
+    radial-gradient(90% 80% at 100% 110%, var(--sky-c) 0%, transparent 55%),
+    radial-gradient(90% 80% at 0% 110%, var(--peach-c) 0%, transparent 55%),
+    var(--surface-2);
+}
+
+/* prefers-reduced-motion (or a no-JS/no-RAF) fallback: one static soft
+   gradient — no blobs, no animation, no mouse tracking. */
+.auth-bg-static {
+  background:
+    radial-gradient(50% 45% at 15% 15%, var(--primary-container) 0%, transparent 70%),
+    radial-gradient(45% 40% at 88% 12%, var(--sky-c) 0%, transparent 70%),
+    radial-gradient(50% 45% at 80% 88%, var(--peach-c) 0%, transparent 70%),
+    radial-gradient(45% 40% at 10% 85%, var(--lilac-c) 0%, transparent 70%);
+  opacity: .8;
+}
+
+/* Each blob lives in its own full-bleed wrapper so the JS-driven pointer-lean
+   transform (on the wrapper) and the CSS idle-float keyframe (on the blob
+   itself) apply to different elements and never fight. */
+.auth-blob-pointer {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+.auth-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: .55;
+  animation: authBlobFloat 20s ease-in-out infinite alternate;
+}
+:root.dark .auth-blob { opacity: .35; filter: blur(85px); }
+
+.auth-blob-grape { background: var(--primary); }
+.auth-blob-mint  { background: var(--mint); }
+.auth-blob-peach { background: var(--peach); }
+.auth-blob-sky   { background: var(--sky); }
+.auth-blob-lilac { background: var(--lilac); }
+
+.auth-blob-1 { width: 36vw; height: 36vw; max-width: 480px; max-height: 480px; top: 6%;  left: 4%;  animation-duration: 19s; }
+.auth-blob-2 { width: 28vw; height: 28vw; max-width: 380px; max-height: 380px; top: 58%; left: 70%; animation-duration: 23s; animation-delay: -4s; }
+.auth-blob-3 { width: 26vw; height: 26vw; max-width: 360px; max-height: 360px; top: 72%; left: 10%; animation-duration: 21s; animation-delay: -9s; }
+.auth-blob-4 { width: 30vw; height: 30vw; max-width: 420px; max-height: 420px; top: 2%;  left: 66%; animation-duration: 25s; animation-delay: -2s; }
+.auth-blob-5 { width: 22vw; height: 22vw; max-width: 320px; max-height: 320px; top: 36%; left: 42%; animation-duration: 27s; animation-delay: -13s; }
+
+@keyframes authBlobFloat {
+  0%   { transform: translate3d(0,0,0) scale(1); }
+  50%  { transform: translate3d(3%, -4%, 0) scale(1.08); }
+  100% { transform: translate3d(-4%, 3%, 0) scale(0.94); }
+}
+
+/* ---------- 6. Reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition-duration: 1ms !important;
+  }
+}
