@@ -1,5 +1,27 @@
+# Python
 backend/.venv/
-data/
 __pycache__/
 *.pyc
+
+# Secrets & local data
 .env
+backend/.env
+data/
+
+# Big local binaries (install Tectonic yourself)
+backend/bin/
+
+# Internal build notes
+CLAUDE.md
+
+# Editor / OS junk
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+backend/bin/
+CLAUDE.md
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
