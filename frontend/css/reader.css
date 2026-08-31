@@ -1,0 +1,332 @@
+/* Immersive PDF reader overlay (Build 4, Step 3).
+   Tailwind (Play CDN) covers most utility styling elsewhere in the app; this
+   file holds the handful of things it can't express: keyframe animation,
+   a custom scrollbar, and the page-canvas layout. Colors are read from the
+   shared design tokens (theme.css §2 / DESIGN.md §2) so the reader themes
+   correctly in light + dark — see DESIGN.md §7 for the z-index stack. */
+
+.reader-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 55; /* above the sidebar; BELOW modals (60) — see DESIGN.md §7 */
+  display: flex;
+  flex-direction: column;
+  background: var(--bg); /* fully opaque — no backdrop-filter (that re-blurs
+     the whole screen every frame and made scrolling/hover/clicks laggy). Opaque
+     means nothing behind the overlay is composited at all. */
+}
+
+@keyframes reader-float-up {
+  from { opacity: 0; transform: translateY(24px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.reader-overlay {
+  opacity: 0;
+  transform: translateY(24px) scale(0.98);
+}
+
+.reader-overlay.reader-open {
+  animation: reader-float-up 260ms ease forwards;
+}
+
+.reader-overlay.reader-closing {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  animation: reader-float-up 220ms ease reverse forwards;
+}
+
+.reader-navbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface); /* opaque — no backdrop-filter blur (perf) */
+  transform: translateY(-16px);
+  opacity: 0;
+  transition: transform 260ms ease, opacity 260ms ease;
+}
+
+.reader-overlay.reader-open .reader-navbar {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+/* .reader-viewport (a normal flex child, sized by the navbar/flex layout)
+   wraps .reader-scroll (position:absolute, fills .reader-viewport) — the
+   actual scrolling element that readerRenderAllPages (app.js) appends every
+   rendered .reader-page into directly. */
+.reader-viewport {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.reader-scroll {
+  position: absolute;
+  inset: 0;
+  overflow: auto; /* vertical scroll + horizontal pan when zoomed past the column width */
+  padding: 2rem 1rem 4rem;
+}
+
+/* Transparent, thin scrollbar for the reading area. Tinted from --text via
+   color-mix so it stays a subtle translucent thumb on both the light and
+   dark --bg gutter (a flat token can't express "translucent over the page
+   background" on its own). */
+.reader-scroll::-webkit-scrollbar {
+  width: 10px;
+}
+.reader-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.reader-scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text) 20%, transparent);
+  border-radius: 8px;
+}
+.reader-scroll::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text) 36%, transparent);
+}
+.reader-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text) 24%, transparent) transparent;
+}
+
+/* Custom canvas reader (reverts the PDFViewer-virtualized phase): every page
+   is its own wrapper built directly in readerRenderAllPages (app.js), holding
+   four stacked children (page bitmap canvas, PDF.js text layer, our
+   annotation canvas, our note-text layer) — no third-party viewer container.
+   The wrapper's inline width/height (cssW/cssH × zoom, set by
+   readerRenderAllPages/readerApplyZoom) is the only thing zoom changes; every
+   child fills it via width:100%/height:100% (the PDF text layer instead
+   stays at its own base size and is realigned with a CSS transform — see
+   below), so nothing here needs to change with zoom. */
+.reader-page {
+  position: relative;
+  margin: 0 auto 1.5rem;
+  border-radius: 0.75rem;
+  background: var(--surface);
+  /* Small-blur shadow: a big blur radius is expensive to rasterize as you
+     scroll new pages into view — a tight shadow looks nearly identical but is
+     far cheaper to paint. var(--shadow-sm) is the token equivalent (already
+     tuned per-theme — a stronger shadow in dark mode where it'd otherwise be
+     invisible against the dark gutter). */
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  /* NO `will-change: transform` here: all pages are rendered up front, so
+     promoting EVERY page to its own permanent GPU layer is a "layer explosion"
+     — it blows the GPU memory budget, forcing texture evictions/re-rasters that
+     jank scrolling, hovers, and clicks. The native scroll container composites
+     the pages fine on its own. (Also NOT content-visibility:auto — that breaks
+     the PDF.js text layer's measurement; that's the earlier "jumbled text" bug.) */
+}
+
+.reader-page-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.reader-fallback {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  text-align: center;
+  padding: 2rem;
+}
+
+/* ---------- Annotation overlays (Build 4, Step 4) ---------- */
+
+/* Drawing surface for highlight/pen. Pointer events are off by default so the
+   page still scrolls in "none" (read) mode; a tool class on .reader-overlay
+   turns them on only while that tool is active. */
+.reader-ann-canvas {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  touch-action: none;
+}
+
+/* Our annotation canvas is a direct child of our own .reader-page wrapper
+   (appended after the page bitmap + PDF text layer, so it stacks visually on
+   top of both). Sizing it to 100%/100% of .reader-page means it always
+   covers exactly the same box as the real page canvas underneath, at every
+   zoom level — zoom resizes the wrapper (readerApplyZoom), and both canvases
+   just follow via this percentage sizing; neither is ever re-rendered. */
+.reader-page canvas.reader-ann-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.reader-overlay.reader-tool-highlight .reader-ann-canvas,
+.reader-overlay.reader-tool-pen .reader-ann-canvas,
+.reader-overlay.reader-tool-eraser .reader-ann-canvas {
+  pointer-events: auto;
+}
+
+.reader-overlay.reader-tool-highlight .reader-ann-canvas,
+.reader-overlay.reader-tool-pen .reader-ann-canvas {
+  cursor: crosshair;
+}
+
+.reader-overlay.reader-tool-eraser .reader-ann-canvas {
+  cursor: cell;
+}
+
+/* Text layer: transparent to clicks by default (individual placed notes opt
+   back in so their text stays selectable); the whole layer only captures
+   clicks (to place a new note) while the text tool is active. */
+.reader-textlayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.reader-overlay.reader-tool-text .reader-textlayer {
+  pointer-events: auto;
+  cursor: text;
+}
+
+/* ---------- PDF text layer ----------
+   Built once per page in readerRenderPdfTextLayer (app.js), via PDF.js's own
+   text-layer API (the `TextLayer` class, or the older `renderTextLayer`
+   function as a fallback — probed at runtime) — this is what makes the page
+   text selectable; pdf_viewer.css (linked in index.html) supplies the base
+   ".textLayer" span/selection styling.
+   Unlike the page canvas / annotation canvas (which fill .reader-page via
+   width:100%/height:100% and so track zoom automatically), the PDF text
+   layer is built once at its own fixed BASE size (cssW × cssH, unzoomed) —
+   rebuilding pdf.js's span layout on every zoom step would defeat the whole
+   point of CSS-only zoom. Instead readerApplyZoom keeps it aligned with a
+   zoomed page via a single `transform: scale()`: PDF.js's spans are
+   %-positioned within it and sized with `calc(var(--scale-factor)*…)`, so
+   scaling the whole layer scales position and font size together and it
+   lands exactly on top of the (also-scaled) page canvas, with no re-render.
+   pdf_viewer.css positions ".textLayer" via `inset:0`, which would stretch it
+   to its (resizing) .reader-page parent instead of holding its own fixed
+   base size — pin it to a plain top-left origin so our inline width/height
+   and transform are what actually apply. */
+.reader-page .textLayer {
+  top: 0;
+  left: 0;
+  right: auto;
+  bottom: auto;
+  transform-origin: 0 0;
+}
+
+/* While a drawing tool IS active, PDF.js's own real text layer must stop
+   intercepting pointer events — otherwise dragging to highlight/draw would
+   instead select the underlying text (its spans have pointer-events: auto by
+   default). Our own .reader-ann-canvas/.reader-textlayer sit on top of it in
+   DOM order already; this just closes the gap for the real PDF text layer
+   underneath. */
+.reader-overlay.reader-tool-highlight .textLayer,
+.reader-overlay.reader-tool-pen .textLayer,
+.reader-overlay.reader-tool-eraser .textLayer,
+.reader-overlay.reader-tool-text .textLayer {
+  pointer-events: none;
+  user-select: none;
+}
+
+.reader-text-note {
+  position: absolute;
+  pointer-events: auto;
+  max-width: 70%;
+  line-height: 1.3;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  font-family: inherit;
+}
+
+.reader-text-editor {
+  position: absolute;
+  min-width: 3ch;
+  max-width: 70%;
+  line-height: 1.3;
+  white-space: pre-wrap;
+  word-break: break-word;
+  outline: none;
+  border: 1px dashed var(--border-strong);
+  border-radius: 0.25rem;
+  padding: 0.05em 0.3em;
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+}
+
+/* Toolbar (mounted into #reader-tools in the navbar). */
+.reader-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  color: var(--text-muted);
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.reader-tool-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.reader-tool-btn-active {
+  background: var(--surface-3);
+  color: var(--primary);
+}
+
+.reader-tool-sep {
+  width: 1px;
+  height: 18px;
+  flex-shrink: 0;
+  background: var(--border);
+  margin: 0 0.15rem;
+}
+
+.reader-swatch {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  border: 1.5px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--border-strong);
+  cursor: pointer;
+}
+
+.reader-swatch-active {
+  box-shadow: 0 0 0 2px var(--primary);
+}
+
+.reader-save-status {
+  min-width: 2.75rem;
+  font-size: 0.7rem;
+  color: var(--text-subtle);
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+
+.reader-save-status.reader-save-visible {
+  opacity: 1;
+}
+
+/* Pomodoro control in the reader navbar (Build 6, Step 4). Idle it's a plain
+   round icon button like its neighbors (.reader-tool-btn's fixed 30px circle);
+   while a focus session is running/paused it instead shows a live MM:SS
+   readout, so it needs to widen to fit the digits without the whole navbar
+   jumping around as the button's own width changes underneath it. */
+#reader-pomodoro.reader-tool-btn-timer {
+  width: auto;
+  min-width: 30px;
+  padding: 0 0.55rem;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
