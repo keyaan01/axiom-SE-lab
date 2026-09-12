@@ -23,6 +23,7 @@ from .base import (
     is_pdf,
     is_image,
     parse_json_list,
+    parse_data_url,
     retry_call,
 )
 
@@ -194,3 +195,34 @@ class AnthropicProvider(AIProvider):
         prompt = repair_prompt_text(name, error, broken_body)
         content = [{"type": "text", "text": prompt}]
         return self._stream_text(content, should_cancel=should_cancel)
+
+    def stream_answer(self, system: str, user: str, image: str | None = None, should_cancel=None):
+        """Stream a study-assistant answer (Phase A of the "ask AI" feature).
+
+        Same messages.stream() event-iteration mechanism as _stream_text
+        above, but yields each text delta as it arrives instead of collecting
+        the whole response first. Unlike the note/quiz/concept prompts (which
+        have no separate system/user split and go entirely into the user
+        message), this call has a real system prompt, so it's passed via the
+        Messages API's own `system` parameter. An optional image crop is
+        parsed from its data: URL into (media_type, base64 data) exactly like
+        _file_block() does for an image Attachment, and sent as an image
+        content block ahead of the question text.
+        """
+        content = []
+        if image:
+            mime, b64 = parse_data_url(image)
+            content.append({"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}})
+        content.append({"type": "text", "text": user})
+        with self._client_obj().messages.stream(
+            model=self._model(),
+            max_tokens=_NOTE_MAX_TOKENS,
+            system=system,
+            messages=[{"role": "user", "content": content}],
+        ) as stream:
+            for chunk in stream:
+                if should_cancel and should_cancel():
+                    raise AICancelled()
+                text = self._delta_text(chunk)
+                if text:
+                    yield text

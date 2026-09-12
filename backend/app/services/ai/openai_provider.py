@@ -293,3 +293,44 @@ class OpenAIProvider(AIProvider):
         prompt = repair_prompt_text(name, error, broken_body)
         messages = [{"role": "user", "content": prompt}]
         return self._stream_text(messages, should_cancel=should_cancel)
+
+    def stream_answer(self, system: str, user: str, image: str | None = None, should_cancel=None):
+        """Stream a study-assistant answer (Phase A of the "ask AI" feature).
+
+        Same chat.completions stream=True mechanism as _stream_text above, but
+        yields each delta as it arrives instead of collecting the whole
+        response first. `image`, when given, is already a data: URL string in
+        exactly the shape _file_part() builds for an image Attachment
+        (data_url(bytes, mime)), so it's used directly as the image_url part's
+        "url" — no re-parsing needed.
+        """
+        user_content = []
+        if image:
+            user_content.append({"type": "image_url", "image_url": {"url": image}})
+        user_content.append({"type": "text", "text": user})
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user_content},
+        ]
+        stream = self._client_obj().chat.completions.create(
+            model=self._model(),
+            messages=messages,
+            stream=True,
+            max_tokens=_NOTE_MAX_TOKENS,
+            temperature=0.4,
+        )
+        try:
+            for chunk in stream:
+                if should_cancel and should_cancel():
+                    raise AICancelled()
+                if not getattr(chunk, "choices", None):
+                    continue
+                delta = getattr(chunk.choices[0], "delta", None)
+                text = getattr(delta, "content", None) if delta is not None else None
+                if text:
+                    yield text
+        finally:
+            try:
+                stream.close()
+            except Exception:
+                pass

@@ -7,6 +7,11 @@ const trashIcon =
   '<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">' +
   '<path stroke-linecap="round" stroke-linejoin="round" d="M6 7h12M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-7 0v11a2 2 0 002 2h4a2 2 0 002-2V7"/></svg>';
 
+// Small pencil icon for inline "rename" affordances (canvas file rows, Build 9 Phase 2b).
+const renameIcon =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>';
+
 const esc = ui.escapeHtml;
 
 /* ---------- accent signifiers (DESIGN.md §2 + §8 Priority 2) ----------
@@ -169,7 +174,7 @@ function lessonRow(item, i = 0) {
   const dotCls = item.note_id ? 'bg-emerald-500' : 'bg-amber-400';
   const doneMark = item.done ? doneCheckIcon : '';
   return `
-    <button data-action="open-schedule-lesson" data-item-id="${item.id}"
+    <button data-action="open-schedule-lesson" data-item-id="${item.id}" data-course-id="${item.course_id}" data-concept-id="${item.concept_id != null ? item.concept_id : ''}"
       style="${riseDelayStyle(i)};background:linear-gradient(135deg, color-mix(in srgb, var(--${accentKey(item.course_id)}) 11%, var(--surface)), var(--surface) 62%)"
       class="card card-interactive rise-in flex w-full items-center gap-3 px-4 py-3 text-left">
       <span class="h-3 w-3 shrink-0 rounded-full ${dotCls}" style="box-shadow:0 0 9px 1px ${item.note_id ? 'var(--success)' : 'var(--warning)'}"></span>
@@ -286,7 +291,7 @@ function calendarChip(item) {
     : '';
   const doneMark = item.done ? `<span class="shrink-0 text-emerald-500" title="Done">${doneCheckIcon}</span>` : '';
   return `
-    <button data-action="open-schedule-lesson" data-item-id="${item.id}" style="${accentContainerStyle(item.course_id)}"
+    <button data-action="open-schedule-lesson" data-item-id="${item.id}" data-course-id="${item.course_id}" data-concept-id="${item.concept_id != null ? item.concept_id : ''}" style="${accentContainerStyle(item.course_id)}"
       class="card-interactive flex w-full items-center gap-1 truncate rounded-md px-1.5 py-0.5 text-left text-[11px] leading-tight">
       <span class="h-1.5 w-1.5 shrink-0 rounded-full ${dotCls}"></span>
       <span class="min-w-0 flex-1 truncate ${item.done ? 'line-through opacity-60' : ''}">${esc(item.concept_name)}</span>
@@ -769,7 +774,7 @@ function noteCard(n, courseId) {
     // invalid HTML and gets hoisted out of the DOM by the parser, breaking
     // the click target. The delegated handler works the same via closest().
     return `
-      <div data-action="open-note" data-note-id="${n.id}" data-course-id="${courseId}" data-title="${esc(n.title)}"
+      <div data-action="open-note" data-note-id="${n.id}" data-course-id="${courseId}" data-concept-id="${n.concept_id != null ? n.concept_id : ''}" data-title="${esc(n.title)}"
         class="card card-interactive group relative overflow-hidden text-left">
         ${doneBadge}
         ${quizChip}
@@ -1470,7 +1475,7 @@ function coursePlanRow(item) {
   const dotCls = item.note_id ? 'bg-emerald-500' : 'bg-amber-400';
   const doneMark = item.done ? doneCheckIcon : '';
   return `
-    <button data-action="open-lesson" data-course-id="${item.course_id}" data-note-id="${item.note_id || ''}"
+    <button data-action="open-lesson" data-course-id="${item.course_id}" data-note-id="${item.note_id || ''}" data-concept-id="${item.concept_id != null ? item.concept_id : ''}"
       class="card card-interactive flex w-full items-center gap-3 px-4 py-3 text-left">
       <span class="h-2.5 w-2.5 shrink-0 rounded-full ${dotCls}"></span>
       <div class="flex min-w-0 flex-1 items-center gap-1.5">
@@ -1600,6 +1605,24 @@ const READER_DEFAULT_ZOOM = 0.58;
 const READER_RESIZE_DEBOUNCE_MS = 300; // re-render all pages at the new fit-width after a window resize settles
 const READER_RENDER_DPR_CAP = 2; // canvas backing-store DPR cap — crisp on retina without ballooning memory across every page rendered up front
 
+/* ---------- "Ask AI" (Phase B): select text or snip a region in the reader,
+   ask about it, get a streamed answer in a docked panel. Backend contract
+   (Phase A, already built): POST /concepts/:id/ask, JSON body
+   { mode?, question?, selection?, context?, image? } -> 200 text/plain
+   STREAMING response. Only enabled when openReader() is passed a conceptId
+   (the canvas lesson-open call sites) — readerState.ask stays null otherwise
+   and none of this UI is rendered. No "pin to canvas" here — that's Phase C. */
+const READER_ASK_MODES = [
+  { mode: 'explain', label: 'Explain' },
+  { mode: 'simple', label: 'Simply' },
+  { mode: 'deep', label: 'In depth' },
+  { mode: 'analogy', label: 'Analogy' },
+  { mode: 'define', label: 'Define' },
+];
+const READER_ASK_MODE_LABELS = READER_ASK_MODES.reduce((m, x) => { m[x.mode] = x.label; return m; }, {});
+const READER_SNIP_MIN_PX = 8;       // ignore a snip drag smaller than this (accidental click)
+const READER_SNIP_MAX_OUTPUT = 1600; // cap the crop's long side (px) so the base64 stays well under the server's 4MB image limit
+
 /* ---------- annotations (Build 4, Step 4) ---------- */
 /* Data model (resolution-independent — fractions of a page's CSS box, so
    annotations replot correctly at any zoom/resize):
@@ -1615,14 +1638,18 @@ const READER_STROKE_THICK = 0.01;
 const READER_TEXT_SIZE = 0.022; // fraction of page height
 
 let readerState = null;        // { note, container, scrollEl, indicatorEl, zoomLabelEl, pdfDoc, scale, observer, resizeHandler, resizeTimer, keyHandler, pages, tool, color, strokeWidth, annotations, dirty, saveTimer }
+                                // note also carries {pdfUrl, annGetUrl, annPutUrl} — defaulted in openReader() to the
+                                // /notes/:id endpoints; canvas-file cards pass explicit /canvas-files/:id ones instead.
 
 function readerFallback(note, container) {
   const scrollEl = container.querySelector('#reader-scroll');
   if (scrollEl) {
+    const base = note.pdfUrl || `/api/notes/${note.id}/pdf`;
+    const href = base + (base.includes('?') ? '&' : '?') + 'download=1';
     scrollEl.innerHTML = `
       <div class="reader-fallback">
         <p class="text-sm text-neutral-500">Couldn't load the rich reader.</p>
-        <a href="/api/notes/${note.id}/pdf?download=1" class="${btnSecondary}">Download PDF</a>
+        <a href="${href}" class="${btnSecondary}">Download PDF</a>
       </div>`;
   }
   const indicator = container.querySelector('#reader-page-indicator');
@@ -1752,7 +1779,7 @@ async function readerFlushSave(state) {
   if (!state.dirty) return;
   state.dirty = false;
   try {
-    await api.put(`/notes/${state.note.id}/annotations`, { data: state.annotations });
+    await api.put(state.note.annPutUrl, { data: state.annotations });
     if (readerState === state) readerShowSaved(state);
   } catch (e) {
     console.error('Reader: failed to save annotations', e);
@@ -1770,7 +1797,7 @@ function readerShowSaved(state) {
 }
 
 function loadReaderAnnotations(note, state) {
-  api.get(`/notes/${note.id}/annotations`).then((res) => {
+  api.get(note.annGetUrl).then((res) => {
     if (readerState !== state) return;
     state.annotations = Array.isArray(res && res.data) ? res.data : [];
     readerRedrawAll(state);
@@ -1921,6 +1948,13 @@ function readerToolbarHtml() {
 
 function readerSetTool(tool) {
   if (!readerState) return;
+  // A drawing tool and "Ask" (text-selection menu / region-snip) are mutually
+  // exclusive read-mode-only affordances — switching tools hides any open
+  // selection menu and cancels an in-progress snip drag.
+  if (readerState.ask) {
+    readerAskMenuHide(readerState);
+    if (readerState.ask.snipping) readerCancelSnip(readerState);
+  }
   readerState.tool = tool;
   const container = readerState.container;
   container.classList.remove('reader-tool-none', 'reader-tool-highlight', 'reader-tool-pen', 'reader-tool-text', 'reader-tool-eraser');
@@ -2000,7 +2034,8 @@ function readerApplyZoom(state) {
 // which stays vector/selectable. The annotated export is a raster snapshot.
 async function readerDownloadAnnotated(state) {
   if (!state || !state.note) return;
-  const cleanUrl = `/api/notes/${state.note.id}/pdf?download=1`;
+  const pdfBase = state.note.pdfUrl || `/api/notes/${state.note.id}/pdf`;
+  const cleanUrl = pdfBase + (pdfBase.includes('?') ? '&' : '?') + 'download=1';
   const downloadClean = () => {
     const a = document.createElement('a');
     a.href = cleanUrl; a.download = '';
@@ -2228,7 +2263,7 @@ async function loadReaderPdf(note, state) {
   }
   const { lib } = window.__pdfjs;
   try {
-    const pdf = await lib.getDocument('/api/notes/' + note.id + '/pdf').promise;
+    const pdf = await lib.getDocument(note.pdfUrl).promise;
     if (readerState !== state) { try { pdf.destroy(); } catch (e) {} return; }
     state.pdfDoc = pdf;
     await readerRenderAllPages(state);
@@ -2248,17 +2283,715 @@ async function loadReaderPdf(note, state) {
   }
 }
 
-function openReader(note) {
+/* ---------- "Ask AI" (Phase B) ----------
+   Two triggers, one flow: selecting text in the PDF's own selectable text
+   layer shows a small floating chip menu (readerAskMenuShow); dragging a
+   marquee over a page (readerToggleSnip / readerSnipPointerDown) crops those
+   pixels into a data: URL instead. Either one opens the docked panel
+   (readerAskOpenPanel) and fires a streamed ask (readerAskFire) against
+   POST /concepts/:conceptId/ask. A follow-up textarea in the panel re-fires
+   with just {question, context} (context = the original selection, carried
+   so the model stays on topic — no new image, no conversation history: the
+   backend is stateless per call, per the Phase-A contract). */
+
+function readerAskMenuHtml() {
+  const chips = READER_ASK_MODES.map((m, i) => `
+    <button type="button" data-action="reader-ask-chip" data-mode="${m.mode}" class="reader-ask-chip">${i === 0 ? '✨ ' : ''}${esc(m.label)}</button>`).join('');
+  // Round 8 item 5: an explicit dismiss (×) — the menu now tracks the live
+  // selection through scroll instead of hiding on it, so there needs to be a
+  // deliberate way to make it go away besides clearing the selection by hand.
+  return chips + `<button type="button" data-action="reader-ask-menu-dismiss" title="Deselect" class="reader-ask-menu-dismiss">&times;</button>`;
+}
+
+function readerAskPanelHtml() {
+  return `
+    <div class="reader-ask-panel-header">
+      <span class="reader-ask-panel-title">✨ Ask AI</span>
+      <button type="button" data-action="reader-ask-close" title="Close" class="icon-btn">
+        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="reader-ask-source" id="reader-ask-source"></div>
+    <div class="reader-ask-thread" id="reader-ask-thread"></div>
+    <div class="reader-ask-pin-bar" id="reader-ask-pin-bar" hidden>
+      <button type="button" id="reader-ask-pin-btn" data-action="reader-ask-pin" class="reader-ask-pin-btn">📌 Pin to canvas</button>
+    </div>
+    <div class="reader-ask-composer">
+      <textarea id="reader-ask-input" class="reader-ask-input" rows="1" placeholder="Ask a follow-up…"></textarea>
+      <button type="button" id="reader-ask-send-btn" data-action="reader-ask-send" class="btn btn-primary reader-ask-send-btn">Send</button>
+    </div>`;
+}
+
+// Wires every "Ask AI" listener for one reader session. Called once from
+// openReader() when hasAsk. Everything attached to `document` here (as
+// opposed to elements inside `state.container`, which die with the container)
+// is torn down explicitly in closeReader() via the handler refs stashed on
+// state.ask._*.
+function readerBuildAskUi(state) {
+  const ask = state.ask;
+  if (!ask) return;
+  const container = state.container;
+  ask.menuEl = container.querySelector('#reader-ask-menu');
+  ask.panelEl = container.querySelector('#reader-ask-panel');
+  ask.sourceEl = container.querySelector('#reader-ask-source');
+  ask.threadEl = container.querySelector('#reader-ask-thread');
+  ask.inputEl = container.querySelector('#reader-ask-input');
+  ask.panelOpen = false;
+  ask.snipping = false;
+  ask.controller = null;
+  ask.context = '';       // carried into follow-ups as `context` (the last text-selection topic)
+  ask.firstContext = '';  // round 7: the first page-context actually sent — captured as `grounding` if pinned
+  ask._pendingSelection = ''; // the selection the floating menu is currently anchored to
+  ask.turns = [];         // {role:'user'|'assistant', text}[] — the whole conversation, for "Pin to canvas" (round 6)
+
+  readerAskRenderSource(state, null); // empty/placeholder state until a topic is set
+  readerAskUpdatePinControl(state);   // hidden until >=1 turn completes
+
+  if (ask.inputEl) {
+    ask.inputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); readerAskSendFollowUp(state); }
+      else if (e.key === 'Escape') {
+        // Close the panel first rather than the whole reader — matches the
+        // existing text-note-editor convention (readerPlaceTextBox) of
+        // stopping Escape from reaching the document-level reader keyHandler.
+        e.stopPropagation();
+        readerAskClosePanel(state);
+      }
+    });
+  }
+
+  // Trigger 1: text selection. selectionchange fires continuously during a
+  // drag, so it's rAF-throttled to at most once per frame; mouseup covers the
+  // "selection just finished" moment (and keyboard/touch selections that
+  // don't always emit a trailing mouseup inside the scroll container).
+  let selRaf = null;
+  const onSelChange = () => {
+    if (selRaf) return;
+    selRaf = requestAnimationFrame(() => { selRaf = null; if (readerState === state) readerHandleSelectionChange(state); });
+  };
+  document.addEventListener('selectionchange', onSelChange);
+  ask._selChangeHandler = onSelChange;
+
+  const onMouseUp = () => { setTimeout(() => { if (readerState === state) readerHandleSelectionChange(state); }, 0); };
+  state.scrollEl.addEventListener('mouseup', onMouseUp);
+  ask._mouseUpHandler = onMouseUp;
+
+  // Round 8 item 5: reposition (not hide) the menu on scroll, so it follows a
+  // still-live selection instead of disappearing the instant the page moves —
+  // readerHandleSelectionChange recomputes the selection's live rect and only
+  // hides the menu once the selection is actually collapsed/cleared. rAF-
+  // throttled like the selectionchange handler above (a plain scroll listener
+  // calling getBoundingClientRect on every tick would be wasteful).
+  let scrollRaf = null;
+  const onScroll = () => {
+    if (scrollRaf) return;
+    scrollRaf = requestAnimationFrame(() => { scrollRaf = null; if (readerState === state) readerHandleSelectionChange(state); });
+  };
+  state.scrollEl.addEventListener('scroll', onScroll);
+  ask._scrollHideHandler = onScroll;
+
+  const onDocMouseDown = (e) => {
+    if (!ask.menuEl || ask.menuEl.hidden || ask.menuEl.contains(e.target)) return;
+    readerAskMenuHide(state);
+  };
+  document.addEventListener('mousedown', onDocMouseDown);
+  ask._outsideClickHandler = onDocMouseDown;
+
+  // Trigger 2: region snip. Attached once to scrollEl (survives the
+  // resize-triggered page-wrapper rebuild in readerRenderAllPages, since only
+  // scrollEl's CHILDREN are replaced, not scrollEl itself); the handler itself
+  // checks state.ask.snipping so it's a no-op outside snip mode.
+  const onPointerDown = (e) => readerSnipPointerDown(state, e);
+  state.scrollEl.addEventListener('pointerdown', onPointerDown);
+  ask._snipPointerDownHandler = onPointerDown;
+}
+
+/* ---- floating "Explain" menu (text-selection trigger) ---- */
+
+function readerHandleSelectionChange(state) {
+  if (!state || !state.ask) return;
+  if (state.tool !== 'none' || state.ask.snipping) { readerAskMenuHide(state); return; }
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) { readerAskMenuHide(state); return; }
+  const text = sel.toString().trim();
+  if (!text) { readerAskMenuHide(state); return; }
+  // Only for a selection inside PDF.js's own selectable text layer (so this
+  // never fires for, say, a drag-select across the navbar or the ask panel).
+  const elOf = (node) => node && (node.nodeType === 1 ? node : node.parentElement);
+  const inLayer = (node) => { const el = elOf(node); return !!(el && el.closest && el.closest('.reader-pdf-textlayer')); };
+  if (!inLayer(sel.anchorNode) || !inLayer(sel.focusNode)) { readerAskMenuHide(state); return; }
+  let rect;
+  try { rect = sel.getRangeAt(0).getBoundingClientRect(); } catch (e) { readerAskMenuHide(state); return; }
+  if (!rect || (!rect.width && !rect.height)) { readerAskMenuHide(state); return; }
+  readerAskMenuShow(state, rect, text);
+}
+
+function readerAskMenuShow(state, rect, text) {
+  const menu = state.ask.menuEl;
+  if (!menu) return;
+  state.ask._pendingSelection = text;
+  menu.hidden = false;
+  const containerRect = state.container.getBoundingClientRect();
+  requestAnimationFrame(() => {
+    if (readerState !== state || menu.hidden) return;
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    let left = rect.left - containerRect.left + rect.width / 2 - mw / 2;
+    let top = rect.top - containerRect.top - mh - 10;
+    if (top < 8) top = rect.bottom - containerRect.top + 10; // flip below the selection if there's no room above
+    left = Math.max(8, Math.min(left, containerRect.width - mw - 8));
+    menu.style.left = left + 'px';
+    menu.style.top = top + 'px';
+  });
+}
+
+function readerAskMenuHide(state) {
+  if (!state || !state.ask || !state.ask.menuEl) return;
+  state.ask.menuEl.hidden = true;
+  state.ask._pendingSelection = '';
+}
+
+/* ---------- current-page context (Build 9 round 7 Part 1) ----------
+   The reader already renders every page's selectable text up front
+   (pageEntry.pdfTextLayerEl). Grounding an ask in "what's on the page right
+   now" costs nothing extra (no upload, no extra API call) — just a bit more
+   text on the one /ask request. */
+
+// Which .reader-page entry a DOM node (e.g. a selection anchor) sits inside,
+// via its PDF.js text layer — null if the node isn't in any page's text layer
+// (or no pageEntry matches, e.g. the reader hasn't finished rendering yet).
+function readerFindPageForNode(state, node) {
+  if (!state || !node) return null;
+  return state.pages.find((p) => p.pdfTextLayerEl && p.pdfTextLayerEl.contains(node)) || null;
+}
+
+// Falls back to "whichever page currently occupies the most visible area of
+// the scroll viewport" — computed on demand from live bounding rects (doesn't
+// depend on the passive IntersectionObserver that only drives the page-number
+// indicator). Used for the navbar "✨ Ask" / typed follow-ups, where there's
+// no selection/snip to anchor to.
+function readerMostVisiblePage(state) {
+  if (!state || !state.pages || !state.pages.length || !state.scrollEl) return null;
+  const viewRect = state.scrollEl.getBoundingClientRect();
+  let best = null, bestArea = 0;
+  state.pages.forEach((p) => {
+    if (!p.wrapper) return;
+    const r = p.wrapper.getBoundingClientRect();
+    const w = Math.max(0, Math.min(r.right, viewRect.right) - Math.max(r.left, viewRect.left));
+    const h = Math.max(0, Math.min(r.bottom, viewRect.bottom) - Math.max(r.top, viewRect.top));
+    const area = w * h;
+    if (area > bestArea) { bestArea = area; best = p; }
+  });
+  return best;
+}
+
+// The relevant page's already-rendered text, whitespace-collapsed and capped
+// — cheap context for /ask with zero extra network calls. `pageEntry` may be
+// passed explicitly (the page a selection/snip came from); omitted, it picks
+// the currently most-visible page. Returns '' if unavailable.
+const READER_ASK_PAGE_CONTEXT_CAP = 2500;
+function readerCurrentPageText(state, pageEntry) {
+  if (!state) return '';
+  const entry = pageEntry || readerMostVisiblePage(state);
+  if (!entry || !entry.pdfTextLayerEl) return '';
+  const raw = entry.pdfTextLayerEl.textContent || '';
+  const collapsed = raw.replace(/\s+/g, ' ').trim();
+  return collapsed.length > READER_ASK_PAGE_CONTEXT_CAP ? collapsed.slice(0, READER_ASK_PAGE_CONTEXT_CAP) : collapsed;
+}
+
+function readerAskChipClick(state, mode) {
+  if (!state || !state.ask) return;
+  const text = state.ask._pendingSelection;
+  // Capture the live selection's anchor BEFORE readerAskMenuHide runs (it only
+  // touches our own menu/_pendingSelection state, not the DOM selection, but
+  // grabbing this first is cheap insurance either way).
+  const sel = window.getSelection && window.getSelection();
+  const anchorNode = sel && sel.anchorNode;
+  readerAskMenuHide(state);
+  if (!text) return;
+  readerAskRenderSource(state, { kind: 'text', text });
+  const page = readerFindPageForNode(state, anchorNode) || readerMostVisiblePage(state);
+  readerAskFire(state, { mode, selection: text, context: readerCurrentPageText(state, page) });
+}
+
+/* ---- region snip (works on diagrams/scans with no selectable text) ---- */
+
+function readerToggleSnip(state) {
+  if (!state || !state.ask) return;
+  if (state.ask.snipping) { readerCancelSnip(state); return; }
+  readerAskMenuHide(state);
+  if (state.tool !== 'none') readerSetTool('none'); // drawing tools and snipping don't mix
+  state.ask.snipping = true;
+  state.container.classList.add('reader-snipping');
+  const btn = state.container.querySelector('[data-action="reader-snip"]');
+  if (btn) btn.classList.add('reader-tool-btn-active');
+}
+
+function readerCancelSnip(state) {
+  if (!state || !state.ask) return;
+  state.ask.snipping = false;
+  state.container.classList.remove('reader-snipping');
+  const btn = state.container.querySelector('[data-action="reader-snip"]');
+  if (btn) btn.classList.remove('reader-tool-btn-active');
+  if (state.ask._snipMarqueeEl) { state.ask._snipMarqueeEl.remove(); state.ask._snipMarqueeEl = null; }
+}
+
+// Delegated on scrollEl (see readerBuildAskUi); a no-op unless snip mode is
+// active. Clamps the marquee to the .reader-page it started on — "constrain a
+// snip to the single page where it began" — even if the pointer strays onto a
+// neighboring page's canvas mid-drag.
+function readerSnipPointerDown(state, e) {
+  if (!state.ask || !state.ask.snipping) return;
+  const wrapper = e.target.closest && e.target.closest('.reader-page');
+  if (!wrapper) return;
+  e.preventDefault();
+  const pageEntry = state.pages.find((p) => p.wrapper === wrapper);
+  if (!pageEntry) return;
+  const wrapRect = wrapper.getBoundingClientRect();
+  const marquee = document.createElement('div');
+  marquee.className = 'reader-snip-marquee';
+  wrapper.appendChild(marquee);
+  state.ask._snipMarqueeEl = marquee;
+  const start = { x: e.clientX, y: e.clientY };
+  const clampRect = (curX, curY) => {
+    const x0 = Math.max(wrapRect.left, Math.min(start.x, curX));
+    const x1 = Math.min(wrapRect.right, Math.max(start.x, curX));
+    const y0 = Math.max(wrapRect.top, Math.min(start.y, curY));
+    const y1 = Math.min(wrapRect.bottom, Math.max(start.y, curY));
+    return { x0, y0, x1, y1 };
+  };
+  const paint = (r) => {
+    marquee.style.left = (r.x0 - wrapRect.left) + 'px';
+    marquee.style.top = (r.y0 - wrapRect.top) + 'px';
+    marquee.style.width = Math.max(0, r.x1 - r.x0) + 'px';
+    marquee.style.height = Math.max(0, r.y1 - r.y0) + 'px';
+  };
+  let last = clampRect(e.clientX, e.clientY);
+  paint(last);
+  const scrollEl = state.scrollEl;
+  try { scrollEl.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+  const onMove = (ev) => { last = clampRect(ev.clientX, ev.clientY); paint(last); };
+  const cleanup = () => {
+    scrollEl.removeEventListener('pointermove', onMove);
+    scrollEl.removeEventListener('pointerup', onUp);
+    scrollEl.removeEventListener('pointercancel', onCancel);
+  };
+  const onUp = () => { cleanup(); if (readerState === state) readerFinishSnip(state, pageEntry, wrapRect, last); };
+  const onCancel = () => { cleanup(); if (readerState === state) readerCancelSnip(state); };
+  scrollEl.addEventListener('pointermove', onMove);
+  scrollEl.addEventListener('pointerup', onUp);
+  scrollEl.addEventListener('pointercancel', onCancel);
+}
+
+// Crops pageEntry.canvas (the page BITMAP, at its full render-time backing-
+// store resolution) to the marquee rect and opens the ask panel with the
+// resulting image. Maps the marquee (in viewport px, relative to the page
+// wrapper) to bitmap pixels by fraction-of-wrapper == fraction-of-canvas —
+// correct at any zoom, since the wrapper and the canvas it contains are
+// always sized in lockstep (readerApplyZoom resizes the wrapper; the canvas
+// fills it via width/height:100%).
+function readerFinishSnip(state, pageEntry, wrapRect, rect) {
+  const w = rect.x1 - rect.x0, h = rect.y1 - rect.y0;
+  readerCancelSnip(state); // always exit snip mode + remove the marquee, whatever the outcome
+  if (w < READER_SNIP_MIN_PX || h < READER_SNIP_MIN_PX) return; // accidental click/tiny drag — no-op
+  const srcCanvas = pageEntry.canvas;
+  const fracX = wrapRect.width ? (rect.x0 - wrapRect.left) / wrapRect.width : 0;
+  const fracY = wrapRect.height ? (rect.y0 - wrapRect.top) / wrapRect.height : 0;
+  const fracW = wrapRect.width ? w / wrapRect.width : 0;
+  const fracH = wrapRect.height ? h / wrapRect.height : 0;
+  const sx = Math.max(0, Math.round(fracX * srcCanvas.width));
+  const sy = Math.max(0, Math.round(fracY * srcCanvas.height));
+  const sw = Math.max(1, Math.min(srcCanvas.width - sx, Math.round(fracW * srcCanvas.width)));
+  const sh = Math.max(1, Math.min(srcCanvas.height - sy, Math.round(fracH * srcCanvas.height)));
+  const longSide = Math.max(sw, sh);
+  const outScale = longSide > READER_SNIP_MAX_OUTPUT ? READER_SNIP_MAX_OUTPUT / longSide : 1;
+  const outW = Math.max(1, Math.round(sw * outScale));
+  const outH = Math.max(1, Math.round(sh * outScale));
+  const off = document.createElement('canvas');
+  off.width = outW;
+  off.height = outH;
+  off.getContext('2d').drawImage(srcCanvas, sx, sy, sw, sh, 0, 0, outW, outH);
+  const dataUrl = off.toDataURL('image/png');
+  readerAskRenderSource(state, { kind: 'image', dataUrl });
+  state.ask.context = ''; // new visual topic — no text context to carry into a follow-up
+  readerAskFire(state, { mode: 'explain', image: dataUrl, context: readerCurrentPageText(state, pageEntry) });
+}
+
+/* ---- docked ask panel: source/topic strip, threaded Q&A, follow-up ---- */
+
+function readerAskRenderSource(state, src) {
+  const el = state.ask && state.ask.sourceEl;
+  if (!el) return;
+  if (!src) {
+    el.innerHTML = `<p class="reader-ask-source-empty">Select text, snip a region, or ask below.</p>`;
+    return;
+  }
+  if (src.kind === 'image') {
+    el.innerHTML = `<div class="reader-ask-source-label">Snipped region</div><img class="reader-ask-source-thumb" src="${src.dataUrl}" alt="Snipped region" />`;
+    return;
+  }
+  const text = (src.text || '').trim();
+  const truncated = text.length > 280 ? text.slice(0, 280) + '…' : text;
+  el.innerHTML = `<div class="reader-ask-source-label">Selected text</div><blockquote class="reader-ask-source-quote">${esc(truncated)}</blockquote>`;
+}
+
+function readerAskOpenPanel(state) {
+  if (!state || !state.ask || !state.ask.panelEl || state.ask.panelOpen) return;
+  state.ask.panelOpen = true;
+  state.ask.panelEl.hidden = false;
+  requestAnimationFrame(() => { if (state.ask && state.ask.panelEl) state.ask.panelEl.classList.add('reader-ask-panel-open'); });
+  readerAskMenuHide(state);
+}
+
+function readerAskClosePanel(state) {
+  if (!state || !state.ask || !state.ask.panelEl || !state.ask.panelOpen) return;
+  state.ask.panelOpen = false;
+  if (state.ask.controller) { try { state.ask.controller.abort(); } catch (e) {} state.ask.controller = null; }
+  state.ask.panelEl.classList.remove('reader-ask-panel-open');
+  setTimeout(() => { if (state.ask && state.ask.panelEl && !state.ask.panelOpen) state.ask.panelEl.hidden = true; }, 220);
+}
+
+/* ---------- rich text rendering for AI answers (Build 9 round 6) ----------
+   Both the reader's ask panel and the canvas 'ai' conversation overlay show
+   raw LLM output -- which is markdown (headings/bold/lists/etc, plus
+   $...$ / $$...$$ / \(...\) / \[...\] math) -- that must never become live
+   HTML. renderRichText() below: (1) HTML-escapes the raw text FIRST (the XSS
+   guard -- every tag that ends up in the DOM comes from this function's own
+   template strings, never from the model's output), (2) pulls math spans out
+   behind placeholder tokens so the markdown pass can't mangle _/* inside
+   them, (3) runs a small hand-rolled markdown->HTML pass over what's left,
+   (4) restores the math, (5) sets innerHTML and lets KaTeX (renderMath) find
+   the delimiters. Best-effort -- anything unrecognized just degrades to
+   escaped plain text. No new CDN dependency.
+
+   Placeholder tokens are wrapped in a control character built at RUNTIME via
+   String.fromCharCode (never a literal control byte in this source file) --
+   a character that never appears in real model output, so the restore
+   regexes below can't misfire against real text the way plain letters+digits
+   could (e.g. a token like "C1" would collide with, and corrupt, a passage
+   like "vitamin C12"). Each restore happens on the JS string BEFORE anything
+   is ever assigned to .innerHTML, so the HTML parser never sees these bytes. */
+const RICH_TEXT_CODE_MARK = String.fromCharCode(1);  // wraps inline `code` placeholders
+const RICH_TEXT_BLOCK_MARK = String.fromCharCode(2); // wraps fenced ```code``` placeholders
+const RICH_TEXT_MATH_MARK = String.fromCharCode(3);  // wraps protected math spans
+
+// Inline code first (so bold/italic can't reach across a `code span`), via
+// the same protect-then-restore trick as the math spans below.
+function richTextInlineCode(s, codeStore) {
+  return s.replace(/`([^`\n]+?)`/g, (m, code) => {
+    const token = RICH_TEXT_CODE_MARK + codeStore.length + RICH_TEXT_CODE_MARK;
+    codeStore.push('<code class="ai-rich-code">' + code + '</code>');
+    return token;
+  });
+}
+
+function richTextInline(s, codeStore) {
+  s = richTextInlineCode(s, codeStore);
+  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (m, txt, url) => `<a href="${url}" rel="noopener" target="_blank">${txt}</a>`);
+  s = s.replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/__([^_\n]+?)__/g, '<strong>$1</strong>');
+  s = s.replace(/\*([^*\n]+?)\*/g, '<em>$1</em>');
+  s = s.replace(/(^|[^\w])_([^_\n]+?)_(?=$|[^\w])/g, '$1<em>$2</em>');
+  return s;
+}
+
+// Converts already-escaped, math-protected text into HTML. Line-oriented:
+// headings/blockquotes/lists are recognized per line, a blank line starts a
+// new paragraph, and a lone newline inside a paragraph becomes a <br>.
+function richTextMarkdown(text) {
+  const codeStore = [];
+  // Fenced code blocks first -- their content must not be touched by anything
+  // below (including the per-line loop) -- pulled to a placeholder and
+  // restored at the very end alongside inline code.
+  const blockStore = [];
+  text = text.replace(/```[^\n]*\n([\s\S]*?)```/g, (m, code) => {
+    const token = RICH_TEXT_BLOCK_MARK + blockStore.length + RICH_TEXT_BLOCK_MARK;
+    blockStore.push('<pre class="ai-rich-pre"><code>' + code.replace(/\n$/, '') + '</code></pre>');
+    return token;
+  });
+  const blockLineRe = new RegExp('^' + RICH_TEXT_BLOCK_MARK + '\\d+' + RICH_TEXT_BLOCK_MARK + '$');
+
+  const lines = text.split('\n');
+  const parts = [];
+  let para = [];
+  let list = null; // { tag: 'ul'|'ol', items: [] }
+
+  const flushPara = () => {
+    if (para.length) {
+      const html = para.join('<br>');
+      if (html.trim()) parts.push('<p>' + html + '</p>');
+      para = [];
+    }
+  };
+  const flushList = () => {
+    if (list) {
+      parts.push('<' + list.tag + '>' + list.items.map((it) => '<li>' + it + '</li>').join('') + '</' + list.tag + '>');
+      list = null;
+    }
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim()) { flushPara(); flushList(); continue; }
+    if (blockLineRe.test(line.trim())) { flushPara(); flushList(); parts.push(line.trim()); continue; }
+    let m = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (m) {
+      flushPara(); flushList();
+      const cls = m[1].length <= 2 ? 'ai-rich-h1' : 'ai-rich-h3';
+      parts.push('<p class="' + cls + '">' + richTextInline(m[2], codeStore) + '</p>');
+      continue;
+    }
+    m = /^&gt;\s?(.*)$/.exec(line); // '>' arrives already HTML-escaped (this runs after esc())
+    if (m) {
+      flushPara(); flushList();
+      const quoted = [richTextInline(m[1], codeStore)];
+      while (i + 1 < lines.length && /^&gt;\s?/.test(lines[i + 1])) {
+        i++;
+        quoted.push(richTextInline(lines[i].replace(/^&gt;\s?/, ''), codeStore));
+      }
+      parts.push('<blockquote>' + quoted.join('<br>') + '</blockquote>');
+      continue;
+    }
+    m = /^\s*[-*+]\s+(.*)$/.exec(line);
+    if (m) {
+      if (!list || list.tag !== 'ul') { flushPara(); flushList(); list = { tag: 'ul', items: [] }; }
+      list.items.push(richTextInline(m[1], codeStore));
+      continue;
+    }
+    m = /^\s*\d+\.\s+(.*)$/.exec(line);
+    if (m) {
+      if (!list || list.tag !== 'ol') { flushPara(); flushList(); list = { tag: 'ol', items: [] }; }
+      list.items.push(richTextInline(m[1], codeStore));
+      continue;
+    }
+    flushList();
+    para.push(richTextInline(line, codeStore));
+  }
+  flushPara(); flushList();
+
+  let html = parts.join('');
+  html = html.replace(new RegExp(RICH_TEXT_BLOCK_MARK + '(\\d+)' + RICH_TEXT_BLOCK_MARK, 'g'), (_, i) => blockStore[Number(i)] || '');
+  html = html.replace(new RegExp(RICH_TEXT_CODE_MARK + '(\\d+)' + RICH_TEXT_CODE_MARK, 'g'), (_, i) => codeStore[Number(i)] || '');
+  return html;
+}
+
+// The shared entry point -- el is the element to fill, rawText the model's raw
+// (unescaped) output. Used at the FINAL render of every AI answer: the
+// reader's ask-panel bubble, the canvas conversation-overlay's assistant
+// turns. (The streaming interim render stays plain textContent -- only the
+// settled text is rich-rendered, here.)
+function renderRichText(el, rawText) {
+  if (!el) return;
+  el.classList.add('ai-rich');
+  let text = esc(String(rawText == null ? '' : rawText));
+
+  const mathStore = [];
+  const pushMath = (m) => { const t = RICH_TEXT_MATH_MARK + mathStore.length + RICH_TEXT_MATH_MARK; mathStore.push(m); return t; };
+  text = text.replace(/\$\$[\s\S]+?\$\$/g, pushMath);
+  text = text.replace(/\\\[[\s\S]+?\\\]/g, pushMath);
+  text = text.replace(/\\\([\s\S]+?\\\)/g, pushMath);
+  text = text.replace(/\$[^\$\n]+?\$/g, pushMath);
+
+  let html = richTextMarkdown(text);
+  html = html.replace(new RegExp(RICH_TEXT_MATH_MARK + '(\\d+)' + RICH_TEXT_MATH_MARK, 'g'), (_, i) => mathStore[Number(i)] || '');
+
+  el.innerHTML = html;
+  renderMath(el);
+}
+
+// Appends a fresh {question, answer} bubble pair to the thread and returns
+// the (initially empty) answer bubble element for the caller to stream into.
+function readerAskAppendPair(state, questionHtml) {
+  const thread = state.ask.threadEl;
+  const wrap = document.createElement('div');
+  wrap.className = 'reader-ask-pair';
+  wrap.innerHTML = `
+    <div class="reader-ask-bubble reader-ask-bubble-q">${questionHtml}</div>
+    <div class="reader-ask-bubble reader-ask-bubble-a"><span class="reader-ask-loading">Thinking…</span></div>`;
+  thread.appendChild(wrap);
+  thread.scrollTop = thread.scrollHeight;
+  return wrap.querySelector('.reader-ask-bubble-a');
+}
+
+// The single entry point for firing an ask (from a chip, a snip, or a
+// follow-up) — opens the panel, appends the Q/A bubble pair, streams the
+// answer in via api.stream, and renders KaTeX once the stream settles. Only
+// one ask streams at a time: a new one aborts whatever's in flight.
+async function readerAskFire(state, params) {
+  if (!state || !state.ask) return;
+  const ask = state.ask;
+  if (ask.controller) { try { ask.controller.abort(); } catch (e) {} }
+  const controller = new AbortController();
+  ask.controller = controller;
+
+  readerAskOpenPanel(state);
+
+  let questionHtml;
+  if (params.image) {
+    questionHtml = '[about the snipped region]';
+  } else if (params.selection) {
+    const label = READER_ASK_MODE_LABELS[params.mode] || 'Explain';
+    const trimmed = params.selection.length > 220 ? params.selection.slice(0, 220) + '…' : params.selection;
+    questionHtml = `<span class="reader-ask-mode-badge">${esc(label)}</span><q>${esc(trimmed)}</q>`;
+  } else {
+    questionHtml = esc(params.question || '');
+  }
+  const answerEl = readerAskAppendPair(state, questionHtml);
+
+  const body = { mode: params.mode || 'explain' };
+  if (params.question) body.question = params.question;
+  if (params.selection) body.selection = params.selection;
+  if (params.context) body.context = params.context;
+  if (params.image) body.image = params.image;
+
+  if (params.selection !== undefined) ask.context = params.selection;
+  // Round 7 Part 1: remember the first page-context actually sent for this
+  // conversation — pinned as `grounding` so a reopened convo stays on-topic
+  // even with the reader (and its page text) long closed.
+  if (params.context && !ask.firstContext) ask.firstContext = params.context;
+
+  let acc = '';
+  try {
+    const full = await api.stream(`/concepts/${ask.conceptId}/ask`, body, (delta) => {
+      if (readerState !== state || ask.controller !== controller) return; // superseded/closed mid-stream
+      acc += delta;
+      answerEl.textContent = acc;
+      if (state.ask.threadEl) state.ask.threadEl.scrollTop = state.ask.threadEl.scrollHeight;
+    }, { signal: controller.signal });
+    if (readerState !== state || ask.controller !== controller) return;
+    const finalText = full || acc;
+    renderRichText(answerEl, finalText);
+
+    // Round 6: accumulate the whole conversation (not just this one answer)
+    // so it can be pinned as a single titled card — see readerAskPinToCanvas.
+    const userText = params.image ? 'Explain this region'
+      : (params.selection !== undefined ? params.selection : (params.question || ''));
+    // Round 7 Part 2: remember what the question was actually anchored to (a
+    // highlighted quote or a snip crop) so a reopened/pinned conversation can
+    // show it back — a typed follow-up carries no snippet.
+    const userTurn = { role: 'user', text: userText };
+    if (params.image) userTurn.snippet = { kind: 'image', dataUrl: params.image };
+    else if (params.selection !== undefined) userTurn.snippet = { kind: 'text', text: params.selection };
+    ask.turns.push(userTurn);
+    ask.turns.push({ role: 'assistant', text: finalText });
+    readerAskUpdatePinControl(state);
+  } catch (err) {
+    if (err && err.name === 'AbortError') return; // fired again / panel closed — not a user-visible error
+    if (readerState !== state || ask.controller !== controller) return;
+    answerEl.classList.add('reader-ask-error');
+    answerEl.textContent = 'Could not get an answer: ' + (err && err.message ? err.message : 'unknown error');
+  } finally {
+    if (ask.controller === controller) ask.controller = null;
+  }
+}
+
+// Shows/hides the ask panel's single "Pin to canvas" control (round 6) —
+// visible only once there's something worth pinning (>=1 completed turn) and
+// a canvas board is actually open to pin it onto.
+function readerAskUpdatePinControl(state) {
+  if (!state || !state.ask || !state.ask.panelEl) return;
+  const bar = state.ask.panelEl.querySelector('#reader-ask-pin-bar');
+  if (!bar) return;
+  bar.hidden = !(canvasState && state.ask.turns && state.ask.turns.length > 0);
+}
+
+// Pins the WHOLE conversation so far as one titled card on the lesson's
+// canvas (round 6 — replaces the old per-answer "Pin to canvas" button).
+// Generates a short title via the same /ask endpoint (no new backend route),
+// falling back to a few words of the first question on error/empty.
+async function readerAskPinToCanvas(state) {
+  if (!state || !state.ask) return;
+  const ask = state.ask;
+  if (!canvasState) { ui.toast('Open this lesson’s canvas to pin a conversation', 'error'); return; }
+  if (ask.conceptId !== canvasState.conceptId) { ui.toast('This conversation belongs to a different lesson', 'error'); return; }
+  if (!ask.turns || !ask.turns.length) return;
+
+  const btn = ask.panelEl && ask.panelEl.querySelector('#reader-ask-pin-btn');
+  if (btn) { if (btn.disabled) return; btn.disabled = true; btn.textContent = 'Pinning…'; }
+
+  const firstUserText = (ask.turns.find((t) => t.role === 'user') || {}).text || '';
+  let title = '';
+  try {
+    const raw = await api.stream(`/concepts/${ask.conceptId}/ask`, {
+      question: `In 2 to 4 words, give a short topic title (no quotes, no punctuation, no trailing period) for this study question: "${firstUserText.slice(0, 300)}". Reply with ONLY the title.`,
+    }, () => {});
+    title = (raw || '').trim().replace(/^["'\s]+|["'\s.。]+$/g, '');
+  } catch (e) { /* fall back below */ }
+  if (!title) {
+    const words = firstUserText.trim().split(/\s+/).filter(Boolean).slice(0, 6);
+    title = words.length ? words.join(' ') : 'AI conversation';
+  }
+
+  // Round 7 Part 1: capture the page context this conversation started from
+  // as `grounding` — so continuing it later (canvasAiConvoSend), even with the
+  // reader closed, still has the lesson page it was about.
+  let grounding = '';
+  if (ask.firstContext) {
+    const capped = ask.firstContext.length > 2000 ? ask.firstContext.slice(0, 2000) : ask.firstContext;
+    grounding = 'From the lesson page:\n' + capped;
+  }
+
+  canvasPinAiConversation({ title, thread: ask.turns.slice(), conceptId: ask.conceptId, sourceItemId: ask.sourceItemId, grounding });
+
+  if (btn) { btn.disabled = false; btn.textContent = '📌 Pin to canvas'; }
+}
+
+function readerAskSendFollowUp(state) {
+  if (!state || !state.ask || !state.ask.inputEl) return;
+  const text = state.ask.inputEl.value.trim();
+  if (!text) { state.ask.inputEl.focus(); return; }
+  state.ask.inputEl.value = '';
+  // Round 7 Part 1: ground every follow-up (incl. one started from the navbar
+  // "✨ Ask" with no prior selection) in the current page's text, layered on
+  // top of the existing prior-selection continuity (`ask.context`).
+  const pageText = readerCurrentPageText(state);
+  const parts = [];
+  if (state.ask.context) parts.push(state.ask.context);
+  if (pageText) parts.push(pageText);
+  const context = parts.length ? parts.join('\n\n').slice(0, 3500) : undefined;
+  readerAskFire(state, { mode: 'explain', question: text, context });
+}
+
+function openReader(note, opts = {}) {
   if (!note || !note.id) { ui.toast('No PDF for this lesson', 'error'); return; }
+  // Backward-compatible URL generalization (Build 9 Phase 2a §7 of CANVAS.md):
+  // existing callers pass {id, title, has_thumb} and get today's /notes/:id
+  // endpoints via these defaults; canvas-file cards instead pass explicit
+  // pdfUrl/annGetUrl/annPutUrl so this same reader can open a dropped
+  // PDF/docx/pptx from the infinite canvas. Stored on readerState.note.*.
+  note = {
+    ...note,
+    pdfUrl: note.pdfUrl || `/api/notes/${note.id}/pdf`,
+    annGetUrl: note.annGetUrl || `/notes/${note.id}/annotations`,
+    annPutUrl: note.annPutUrl || `/notes/${note.id}/annotations`,
+  };
   if (readerState) closeReader();
+
+  // "Ask AI" (Phase B) is opt-in per open: only the canvas lesson-open call
+  // sites pass a conceptId. The dormant study-view callers pass no 2nd arg
+  // (opts = {}), so hasAsk stays false there — no menu/panel/buttons render.
+  const hasAsk = !!(opts && opts.conceptId);
 
   const container = document.createElement('div');
   container.className = 'reader-overlay reader-tool-none';
   container.innerHTML = `
     <div class="reader-navbar">
-      <p class="min-w-0 truncate text-sm font-semibold text-ink" title="${esc(note.title || '')}">${esc(note.title || 'Untitled')}</p>
+      ${note.renameUrl
+        ? `<div class="flex min-w-0 flex-1 items-center gap-1.5" title="Click to rename this file">
+             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-neutral-400"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+             <input id="reader-title" value="${esc(note.title || 'Untitled')}" spellcheck="false" aria-label="Rename file"
+               class="min-w-0 flex-1 truncate rounded-md border border-dashed border-neutral-300 bg-transparent px-1.5 py-0.5 text-sm font-semibold text-ink transition hover:border-neutral-400 focus:border-solid focus:bg-neutral-100 focus:outline-none" />
+           </div>`
+        : `<p class="min-w-0 truncate text-sm font-semibold text-ink" title="${esc(note.title || '')}">${esc(note.title || 'Untitled')}</p>`}
       <div class="flex shrink-0 items-center gap-3">
         <div id="reader-tools" class="flex items-center gap-1">${readerToolbarHtml()}</div>
+        ${hasAsk ? `
+        <span class="reader-tool-sep"></span>
+        <div class="flex items-center gap-1">
+          <button data-action="reader-snip" title="Snip a region to ask about" class="reader-tool-btn">
+            <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" stroke-dasharray="3 3"/></svg>
+          </button>
+          <button data-action="reader-ask-open" title="Ask AI about this lesson" class="reader-ask-open-btn">✨ Ask</button>
+        </div>` : ''}
         <div class="flex items-center gap-0.5">
           <button data-action="reader-zoom-out" title="Zoom out (Ctrl/Cmd -)" class="reader-tool-btn">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6"/></svg>
@@ -2283,7 +3016,9 @@ function openReader(note) {
     </div>
     <div class="reader-viewport">
       <div class="reader-scroll" id="reader-scroll"></div>
-    </div>`;
+      ${hasAsk ? `<div class="reader-ask-panel" id="reader-ask-panel" hidden>${readerAskPanelHtml()}</div>` : ''}
+    </div>
+    ${hasAsk ? `<div class="reader-ask-menu" id="reader-ask-menu" hidden>${readerAskMenuHtml()}</div>` : ''}`;
   document.body.appendChild(container);
   requestAnimationFrame(() => { container.classList.add('reader-open'); });
 
@@ -2331,7 +3066,15 @@ function openReader(note) {
     dirty: false,
     saveTimer: null,
     savedFadeTimer: null,
+    ask: hasAsk ? {
+      conceptId: opts.conceptId,
+      conceptName: opts.conceptName || '',
+      conceptSummary: opts.conceptSummary || '',
+      sourceItemId: opts.sourceItemId || null,
+    } : null,
   };
+
+  if (hasAsk) readerBuildAskUi(readerState);
 
   // Independent of the PDF load below: fetches saved annotations in parallel.
   // Whichever of "annotations loaded" or "pages rendered" finishes first, the
@@ -2341,12 +3084,50 @@ function openReader(note) {
   loadReaderAnnotations(note, readerState);
   loadReaderPdf(note, readerState);
   renderPomodoroReaderBtn(); // reflect a timer that's already running when the reader opens
+
+  // Editable title (canvas files only — notes pass no renameUrl). Enter/blur
+  // commits via PATCH; Escape reverts and is stopped from reaching the reader's
+  // document-level close handler.
+  if (note.renameUrl) {
+    const inp = container.querySelector('#reader-title');
+    if (inp) {
+      let committing = false;
+      const commit = async () => {
+        if (committing) return;
+        const name = (inp.value || '').trim();
+        if (!name || name === note.title) { inp.value = note.title || 'Untitled'; return; }
+        committing = true;
+        try {
+          await api.patch(note.renameUrl, { display_name: name });
+          note.title = name;
+          if (typeof note.onRenamed === 'function') note.onRenamed(name);
+        } catch (err) { ui.toast('Rename failed', 'error'); inp.value = note.title || 'Untitled'; }
+        finally { committing = false; }
+      };
+      inp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); inp.blur(); }
+        else if (e.key === 'Escape') { e.stopPropagation(); inp.value = note.title || 'Untitled'; inp.blur(); }
+      });
+      inp.addEventListener('blur', commit);
+    }
+  }
 }
 
 function closeReader() {
   if (!readerState) return;
   const st = readerState;
   readerState = null; // mark closed immediately so a re-entrant openReader() can proceed
+  if (st.ask) {
+    // Abort any in-flight ask + remove the document-level listeners (the
+    // scrollEl-level ones die with the container below, but these two are on
+    // `document` and would otherwise leak across reader opens/route changes).
+    if (st.ask.controller) { try { st.ask.controller.abort(); } catch (e) {} st.ask.controller = null; }
+    if (st.ask._selChangeHandler) document.removeEventListener('selectionchange', st.ask._selChangeHandler);
+    if (st.ask._outsideClickHandler) document.removeEventListener('mousedown', st.ask._outsideClickHandler);
+    if (st.ask._mouseUpHandler && st.scrollEl) st.scrollEl.removeEventListener('mouseup', st.ask._mouseUpHandler);
+    if (st.ask._scrollHideHandler && st.scrollEl) st.scrollEl.removeEventListener('scroll', st.ask._scrollHideHandler);
+    if (st.ask._snipPointerDownHandler && st.scrollEl) st.scrollEl.removeEventListener('pointerdown', st.ask._snipPointerDownHandler);
+  }
   if (st.saveTimer) { clearTimeout(st.saveTimer); st.saveTimer = null; }
   if (st.savedFadeTimer) clearTimeout(st.savedFadeTimer);
   if (st.resizeTimer) { clearTimeout(st.resizeTimer); st.resizeTimer = null; }
@@ -2355,7 +3136,7 @@ function closeReader() {
   if (st.dirty) {
     // Fire-and-forget: fetch keeps running after the DOM/state teardown below.
     st.dirty = false;
-    api.put(`/notes/${st.note.id}/annotations`, { data: st.annotations }).catch((e) => {
+    api.put(st.note.annPutUrl, { data: st.annotations }).catch((e) => {
       console.error('Reader: failed to flush annotations on close', e);
     });
   }
@@ -2367,6 +3148,3079 @@ function closeReader() {
     el.classList.add('reader-closing');
     setTimeout(() => { el.remove(); }, 260);
   }
+}
+
+/* ---------- infinite canvas (Build 9 "Axiom Canvas", Phase 2a) ----------
+   Spec: frontend/CANVAS.md. A "lesson" is keyed by concept_id. Replaces the
+   old study window as the place lessons are opened (§8.2); the compiled
+   note is item #0, dropped canvas_files (Phase 2b uploads them — this phase
+   just renders whatever Phase-1's backend already returns) are the rest.
+   World transform (§3): #canvas-world has `transform: translate(tx,ty)
+   scale(s)`; every item is an absolutely positioned child using RAW world
+   px for left/top/width/height — the single parent transform does the
+   pan/zoom for all of them at once, so no per-item math is needed outside
+   drag/resize (which convert a screen-space pointer delta to world space by
+   dividing by `scale`). */
+
+let canvasState = null; // { courseId, conceptId, scrollEl, worldEl, note, concept, files, filesById,
+                         //   itemsById (Map id -> {data, el, refKind, refObj, clickable}),
+                         //   tx, ty, scale, selectedId, drawings, dirty, saveTimer, spaceDown, _cleanup,
+                         //   fileSearch, fileSort, _panRaf }  (Phase 2b additions: concept, fileSearch,
+                         //   fileSort, _panRaf — everything else is Phase 2a)
+
+const CANVAS_ZOOM_MIN = 0.15;
+const CANVAS_ZOOM_MAX = 4;
+const CANVAS_GRID_SIZE = 22; // px of dot-grid spacing at scale 1 (canvas.css draws the dots)
+const CANVAS_POLL_INTERVAL_MS = 1500; // convert-status poll cadence for docx/pptx canvas files
+const CANVAS_POLL_MAX_ATTEMPTS = 80;  // ~2 minutes cap — guards against a stuck poll
+
+// ---- Phase 3 (whiteboard vector layer) — CANVAS.md §4.3/§9. World-space SVG
+// drawings, conceptually the reader annotation engine (app.js ~1608+) adapted
+// to store absolute world coords instead of page fractions and render as SVG
+// DOM nodes instead of a 2-D canvas, so shapes/text/connectors stay
+// individually addressable and connectors can re-route on item move.
+const CANVAS_SVG_NS = 'http://www.w3.org/2000/svg';
+const CANVAS_XHTML_NS = 'http://www.w3.org/1999/xhtml';
+const CANVAS_COLORS = READER_COLORS.concat(['#7A5AF8', '#12B886']); // reuse + a couple more (CANVAS.md §9)
+const CANVAS_STROKE_WIDTHS = [2, 4, 8]; // world px — thin/medium/thick
+const CANVAS_TEXT_SIZE = 18; // world px font-size for a fresh text/sticky note
+// Round 9: connectors between cards are ALWAYS this bright neon purple (on-theme
+// with --primary #7A5AF8 / --lilac #C77DFF; reads clearly on both the light and
+// dark canvas), distinct from the user-colored `arrow` tool. Applied at render
+// time in canvasBuildDrawingEl so legacy/persisted connectors turn purple too.
+const CANVAS_CONNECTOR_COLOR = '#B026FF';
+const CANVAS_TOOLS = ['select', 'pen', 'text', 'sticky', 'rect', 'ellipse', 'line', 'arrow', 'connector', 'eraser'];
+const CANVAS_HISTORY_CAP = 100;
+
+function canvasClampScale(s) { return Math.min(CANVAS_ZOOM_MAX, Math.max(CANVAS_ZOOM_MIN, s)); }
+function canvasNewItemId() { return 'it_' + Math.random().toString(36).slice(2, 10); }
+
+function canvasSidebarCollapsed(side) {
+  try { return localStorage.getItem(`axiom_canvas_sidebar_${side}`) === '1'; } catch (e) { return false; }
+}
+function canvasSetSidebarCollapsed(side, val) {
+  try { localStorage.setItem(`axiom_canvas_sidebar_${side}`, val ? '1' : '0'); } catch (e) { /* ignore */ }
+}
+
+/* ---- resizable sidebars (round 7 Part 6) ---- */
+const CANVAS_SIDEBAR_WIDTH_DEFAULT = 240;
+const CANVAS_SIDEBAR_WIDTH_MIN = 200;
+const CANVAS_SIDEBAR_WIDTH_MAX = 480;
+
+function canvasClampSidebarWidth(px) {
+  return Math.min(CANVAS_SIDEBAR_WIDTH_MAX, Math.max(CANVAS_SIDEBAR_WIDTH_MIN, Math.round(px)));
+}
+function canvasSidebarWidth(side) {
+  try {
+    const raw = localStorage.getItem(`axiom_canvas_sidebar_w_${side}`);
+    const n = raw ? parseInt(raw, 10) : NaN;
+    return Number.isFinite(n) ? canvasClampSidebarWidth(n) : CANVAS_SIDEBAR_WIDTH_DEFAULT;
+  } catch (e) { return CANVAS_SIDEBAR_WIDTH_DEFAULT; }
+}
+function canvasSetSidebarWidth(side, px) {
+  const clamped = canvasClampSidebarWidth(px);
+  try { localStorage.setItem(`axiom_canvas_sidebar_w_${side}`, String(clamped)); } catch (e) { /* ignore */ }
+  return clamped;
+}
+
+// Pointer-drag on a sidebar's resizer grip (its content-facing / right edge).
+// Mirrors the reader snip/marquee drag pattern: setPointerCapture on the grip
+// itself so subsequent pointermove/up keep firing on it regardless of where
+// the cursor strays, then persist the final width on pointerup. A no-op while
+// that sidebar is collapsed (the grip is hidden via CSS then too).
+function canvasWireSidebarResizer(resizerEl) {
+  const side = resizerEl.dataset.side;
+  resizerEl.addEventListener('pointerdown', (e) => {
+    if (canvasSidebarCollapsed(side)) return;
+    const sidebarEl = document.getElementById(`canvas-sidebar-${side}`);
+    if (!sidebarEl) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = sidebarEl.getBoundingClientRect().width;
+    try { resizerEl.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    resizerEl.classList.add('canvas-sidebar-resizer-active');
+    sidebarEl.classList.add('canvas-sidebar-resizing'); // suspend the collapse-width transition so live drags don't lag/rubber-band
+    const onMove = (ev) => {
+      const next = canvasClampSidebarWidth(startWidth + (ev.clientX - startX));
+      sidebarEl.style.width = next + 'px';
+    };
+    const onUp = () => {
+      resizerEl.removeEventListener('pointermove', onMove);
+      resizerEl.removeEventListener('pointerup', onUp);
+      resizerEl.removeEventListener('pointercancel', onUp);
+      resizerEl.classList.remove('canvas-sidebar-resizer-active');
+      sidebarEl.classList.remove('canvas-sidebar-resizing');
+      canvasSetSidebarWidth(side, parseFloat(sidebarEl.style.width) || CANVAS_SIDEBAR_WIDTH_DEFAULT);
+    };
+    resizerEl.addEventListener('pointermove', onMove);
+    resizerEl.addEventListener('pointerup', onUp);
+    resizerEl.addEventListener('pointercancel', onUp);
+  });
+}
+
+function canvasReadinessDot(note) {
+  const style = (color) => `<span class="canvas-dot" style="background:${color}"></span>`;
+  if (!note) return style('var(--border-strong)');
+  if (note.status === 'compiled') return style('var(--success)');
+  if (note.status === 'failed') return style('var(--danger)');
+  if (note.status === 'generating') return '<span class="canvas-dot canvas-dot-spin"></span>';
+  return style('var(--border-strong)');
+}
+
+/* ---- entry point: "Study" button only has a course id — resolve a lesson ---- */
+async function openCourseCanvas(courseId) {
+  try {
+    const concepts = await api.get(`/courses/${courseId}/concepts`);
+    if (!concepts.length) { ui.toast('No lessons yet — analyze materials first.', 'error'); return; }
+    const notes = await api.get(`/courses/${courseId}/notes`).catch(() => []);
+    const withCompiledNote = concepts.find((c) => notes.some((n) => n.concept_id === c.id && n.status === 'compiled'));
+    const target = withCompiledNote || concepts[0];
+    location.hash = `#/course/${courseId}/canvas/${target.id}`;
+  } catch (e) { ui.toast(e.message, 'error'); }
+}
+
+/* ---- shell markup: 64px icon rail (untouched, outside #view) + two new
+   collapsible sidebars + the canvas surface, all inside #view (full-bleed) ---- */
+
+function canvasSidebarToggleIcon(collapsed) {
+  const d = collapsed ? 'M9 5l7 7-7 7' : 'M15 5l-7 7 7 7';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`;
+}
+
+function canvasSidebarToggleBtnHtml(side, collapsed) {
+  return `
+    <button data-action="canvas-toggle-sidebar" data-side="${side}" title="${collapsed ? 'Expand' : 'Collapse'}" class="icon-btn canvas-sidebar-toggle">
+      ${canvasSidebarToggleIcon(collapsed)}
+    </button>`;
+}
+
+function canvasLessonRowHtml(courseId, concept, note, active) {
+  return `
+    <button data-action="canvas-select-lesson" data-course-id="${courseId}" data-concept-id="${concept.id}"
+      class="canvas-lesson-row${active ? ' active' : ''}" title="${esc(concept.name)}">
+      ${canvasReadinessDot(note)}<span class="truncate">${esc(concept.name)}</span>
+    </button>`;
+}
+
+// ---- lesson controls (round 5 §0): the lesson's two actions — Start Quiz +
+// Mark-done toggle — now live inline in the canvas TOPBAR (next to the lesson
+// title), not in a card at the top of the Files sidebar (which the user found
+// congested). The concept name is already the topbar title and its summary is
+// the title's tooltip, so the old "Studying" label / name / summary are gone.
+// Reuses the existing doneToggleBtn()/toggleDone()/quizButtonLabel() plumbing
+// unchanged, so a "Mark done" click here still updates in place everywhere.
+function canvasLessonControlsHtml(concept, note) {
+  if (!concept) return '';
+  const done = !!(note && note.done);
+  return `
+    <button data-action="start-quiz" data-concept-id="${concept.id}" class="btn btn-primary canvas-lesson-quiz-btn">${quizButtonLabel(concept.id)}</button>
+    ${doneToggleBtn(concept.id, done, 'row')}`;
+}
+
+function canvasRenderLessonControls(state) {
+  const host = document.getElementById('canvas-lesson-controls');
+  if (host) host.innerHTML = canvasLessonControlsHtml(state.concept, state.note);
+}
+
+// ---- file-container rows (Phase 2b §2): note #0 first, then canvas files —
+// search + sort control which/how the FILE rows (never the note) are
+// filtered/ordered; a null itemId (file exists but nothing currently places
+// it on the board) degrades gracefully in canvasPanToItem().
+function canvasFileRowHtml(row) {
+  // Round 7 Part 3: a pinned AI conversation — the "AI" tag, its title, and a
+  // delete control. Unlike a file row, clicking it OPENS the conversation
+  // (content, not a spatial location on the board) rather than panning to it.
+  if (row.rowKind === 'ai') {
+    return `
+      <div class="canvas-file-row" title="${esc(row.name)}">
+        <div data-action="canvas-open-convo" data-item-id="${row.itemId}" class="canvas-file-row-main">
+          <span class="canvas-file-tag canvas-file-tag-ai">AI</span>
+          <span class="truncate">${esc(row.name)}</span>
+        </div>
+        <span class="canvas-file-row-actions">
+          <button type="button" data-action="canvas-delete-convo" data-item-id="${row.itemId}" title="Delete conversation" class="canvas-file-action canvas-file-action-danger">${trashIcon}</button>
+        </span>
+      </div>`;
+  }
+  // Round 8 item 3: the lesson's own note (item #0) gets a rename-only action
+  // (no delete — it's not removable from the canvas) that renames the whole
+  // lesson (concept + note), same as editing the note title in the reader.
+  const actionsHtml = row.rowKind === 'note'
+    ? `<button type="button" data-action="canvas-rename-note" title="Rename" class="canvas-file-action">${renameIcon}</button>`
+    : `<button type="button" data-action="canvas-rename-file" data-file-id="${row.fileId}" title="Rename" class="canvas-file-action">${renameIcon}</button>
+      <button type="button" data-action="canvas-delete-file" data-file-id="${row.fileId}" title="Remove" class="canvas-file-action canvas-file-action-danger">${trashIcon}</button>`;
+  return `
+    <div class="canvas-file-row" title="${esc(row.name)}">
+      <div data-action="canvas-pan-to-item" data-item-id="${row.itemId || ''}" class="canvas-file-row-main">
+        <span class="canvas-file-tag">${esc(row.kindLabel)}</span>
+        <span class="truncate">${esc(row.name)}</span>
+        ${row.statusLabel ? `<span class="canvas-file-status">${esc(row.statusLabel)}</span>` : ''}
+      </div>
+      <span class="canvas-file-row-actions">${actionsHtml}</span>
+    </div>`;
+}
+
+// Rebuilds #canvas-file-list from current state (files/note + the live
+// itemsById map) applying the search/sort the sidebar controls hold on
+// `state`. Called after mount, and after any upload/rename/delete/poll
+// changes what's on the board — never rebuilds the rest of the shell.
+function canvasRenderFileList(state) {
+  const host = document.getElementById('canvas-file-list');
+  if (!host) return;
+  const q = (state.fileSearch || '').trim().toLowerCase();
+  const sort = state.fileSort || 'newest';
+
+  const noteRow = state.note ? {
+    rowKind: 'note',
+    itemId: canvasFindItemIdByRef(state, 'note', state.note.id),
+    fileId: null,
+    kindLabel: 'NOTE',
+    name: state.note.title || 'Note',
+    statusLabel: state.note.status !== 'compiled' ? state.note.status : '',
+  } : null;
+
+  let fileRows = state.files.map((f) => ({
+    rowKind: 'file',
+    kind: f.kind || '',
+    itemId: canvasFindItemIdByRef(state, 'canvas-file', f.id),
+    fileId: f.id,
+    kindLabel: (f.kind || '').toUpperCase(),
+    name: f.display_name,
+    statusLabel: f.status !== 'ready' ? f.status : '',
+    createdAt: f.created_at || '',
+  }));
+
+  if (q) fileRows = fileRows.filter((r) => r.name.toLowerCase().includes(q));
+  const cmp = (a, b) => {
+    if (sort === 'name') return a.name.localeCompare(b.name);
+    if (sort === 'type') return a.kindLabel.localeCompare(b.kindLabel) || a.name.localeCompare(b.name);
+    return (b.createdAt || '').localeCompare(a.createdAt || ''); // newest first
+  };
+  const showNote = !!noteRow && (!q || noteRow.name.toLowerCase().includes(q));
+
+  // Round 7 Part 3: pinned AI conversations, scanned live off the itemsById
+  // map (their thread/title lives only in the item's ref — no separate
+  // client-side collection) so they're searchable/sortable alongside files.
+  let aiRows = [];
+  state.itemsById.forEach((entry, itemId) => {
+    if (entry.refKind !== 'ai') return;
+    const obj = entry.refObj || {};
+    aiRows.push({
+      rowKind: 'ai',
+      kind: 'ai',
+      itemId,
+      fileId: null,
+      kindLabel: 'AI',
+      name: obj.title || 'AI conversation',
+      statusLabel: '',
+      createdAt: obj.created_at ? new Date(obj.created_at).toISOString() : '',
+    });
+  });
+  if (q) aiRows = aiRows.filter((r) => r.name.toLowerCase().includes(q));
+  aiRows.sort(cmp);
+
+  // Group by type with subheaders (fixed order); hide empty groups.
+  const groups = [
+    { label: 'Lesson note', rows: showNote ? [noteRow] : [] },
+    { label: 'Images', rows: fileRows.filter((r) => r.kind === 'image').sort(cmp) },
+    { label: 'PDFs', rows: fileRows.filter((r) => r.kind === 'pdf').sort(cmp) },
+    { label: 'Documents', rows: fileRows.filter((r) => r.kind === 'docx' || r.kind === 'pptx').sort(cmp) },
+    { label: 'Conversations', rows: aiRows },
+  ].filter((g) => g.rows.length);
+
+  host.innerHTML = groups.length
+    ? groups.map((g) => `<p class="canvas-file-group-title">${esc(g.label)}</p>${g.rows.map(canvasFileRowHtml).join('')}`).join('')
+    : `<p class="canvas-sidebar-empty">${q ? 'Nothing matches your search.' : 'No files or conversations on this board yet.'}</p>`;
+}
+
+// Left sidebar in SCHEDULE origin: the upcoming schedule lessons grouped by day
+// (cross-course), mirroring the dashboard agenda. Each row switches the canvas
+// to that lesson (canvas-select-lesson handles the cross-course case).
+function canvasScheduleSidebarHtml(items, activeConceptId) {
+  if (!items || !items.length) return '<p class="canvas-sidebar-empty">No scheduled lessons.</p>';
+  const byDate = new Map();
+  items.forEach((it) => {
+    const d = it.study_date || '';
+    if (!byDate.has(d)) byDate.set(d, []);
+    byDate.get(d).push(it);
+  });
+  return Array.from(byDate.keys()).sort().map((d) => {
+    const rows = byDate.get(d).map((it) => {
+      const active = it.concept_id === activeConceptId ? ' active' : '';
+      const dotColor = it.note_id ? 'var(--success)' : 'var(--text-subtle)';
+      const course = esc(it.course_code || it.course_name || '');
+      return `<button data-action="canvas-select-lesson" data-course-id="${it.course_id}" data-concept-id="${it.concept_id}" class="canvas-lesson-row${active}" title="${esc(it.concept_name || '')}"><span class="canvas-dot" style="background:${dotColor}"></span><span class="truncate">${esc(it.concept_name || 'Lesson')}</span>${course ? `<span class="canvas-sched-course">${course}</span>` : ''}</button>`;
+    }).join('');
+    return `<p class="canvas-sched-date">${esc(fmtDate(d))}</p>${rows}`;
+  }).join('');
+}
+
+function canvasShellHtml(courseId, activeConceptId, concepts, notesByConceptId, activeConcept, activeNote, files, origin, scheduleItems) {
+  const lessonsCollapsed = canvasSidebarCollapsed('lessons');
+  const filesCollapsed = canvasSidebarCollapsed('files');
+  const lessonsWidthAttr = lessonsCollapsed ? '' : ` style="width:${canvasSidebarWidth('lessons')}px"`;
+  const filesWidthAttr = filesCollapsed ? '' : ` style="width:${canvasSidebarWidth('files')}px"`;
+  const isSchedule = origin === 'schedule';
+
+  const listHtml = isSchedule
+    ? canvasScheduleSidebarHtml(scheduleItems, activeConceptId)
+    : concepts.map((c) => canvasLessonRowHtml(courseId, c, notesByConceptId.get(c.id), c.id === activeConceptId)).join('');
+  const backHtml = isSchedule
+    ? `<a href="#/" class="btn btn-ghost">&larr; Schedule</a>`
+    : `<a href="#/course/${courseId}" class="btn btn-ghost">&larr; Course</a>`;
+
+  return `
+    <div class="canvas-shell canvas-tool-select">
+      <div class="canvas-sidebar canvas-sidebar-lessons${lessonsCollapsed ? ' collapsed' : ''}" id="canvas-sidebar-lessons"${lessonsWidthAttr}>
+        <div class="canvas-sidebar-header">
+          <span class="canvas-sidebar-title">${isSchedule ? 'Schedule' : 'Lessons'}</span>
+          ${canvasSidebarToggleBtnHtml('lessons', lessonsCollapsed)}
+        </div>
+        <div class="canvas-sidebar-list" id="canvas-lesson-list">${listHtml}</div>
+        <div class="canvas-sidebar-resizer" data-side="lessons" title="Drag to resize"></div>
+      </div>
+      <div class="canvas-sidebar canvas-sidebar-files${filesCollapsed ? ' collapsed' : ''}" id="canvas-sidebar-files"${filesWidthAttr}>
+        <div class="canvas-sidebar-header">
+          <span class="canvas-sidebar-title">Files</span>
+          ${canvasSidebarToggleBtnHtml('files', filesCollapsed)}
+        </div>
+        <div class="canvas-sidebar-body">
+          <div class="canvas-panel-card canvas-tools-card">
+            <div class="canvas-file-toolbar">
+              <input id="canvas-file-search" type="search" placeholder="Search files&hellip;" class="field-input canvas-file-search" />
+              <select id="canvas-file-sort" class="field-input canvas-file-sort">
+                <option value="newest">Newest</option>
+                <option value="name">Name (A&ndash;Z)</option>
+                <option value="type">Type</option>
+              </select>
+            </div>
+            <button id="canvas-add-file-btn" type="button" class="btn btn-secondary canvas-add-file-btn">+ Add file</button>
+            <input id="canvas-file-input" type="file" multiple class="hidden" />
+          </div>
+          <div class="canvas-panel-card canvas-files-card">
+            <p class="canvas-panel-card-title">Files</p>
+            <div class="canvas-sidebar-list" id="canvas-file-list"></div>
+          </div>
+        </div>
+        <div class="canvas-sidebar-resizer" data-side="files" title="Drag to resize"></div>
+      </div>
+      <div class="canvas-main">
+        <div class="canvas-topbar">
+          ${backHtml}
+          <p class="canvas-topbar-title truncate" title="${esc(activeConcept && activeConcept.summary ? activeConcept.summary : '')}">${esc(activeConcept ? activeConcept.name : 'Lesson')}</p>
+          <div class="canvas-lesson-controls" id="canvas-lesson-controls">${canvasLessonControlsHtml(activeConcept, activeNote)}</div>
+          <div class="canvas-zoom-controls">
+            <button data-action="canvas-zoom-out" title="Zoom out (-)" class="icon-btn">&minus;</button>
+            <span id="canvas-zoom-level" class="canvas-zoom-label">100%</span>
+            <button data-action="canvas-zoom-in" title="Zoom in (+)" class="icon-btn">&plus;</button>
+            <button data-action="canvas-zoom-reset" title="Fit to view (0)" class="btn btn-ghost">Fit</button>
+          </div>
+        </div>
+        <div class="canvas-scroll" id="canvas-scroll">
+          <div class="canvas-world" id="canvas-world">
+            <svg id="canvas-vectors"
+                 style="position:absolute; left:-100000px; top:-100000px; width:200000px; height:200000px; overflow:visible;"
+                 viewBox="-100000 -100000 200000 200000">
+              <defs id="canvas-vectors-defs"></defs>
+              <g id="canvas-vectors-g"></g>
+            </svg>
+          </div>
+        </div>
+        <div id="canvas-toolbar-host"></div>
+      </div>
+    </div>`;
+}
+
+function canvasToggleSidebar(side) {
+  const collapsed = !canvasSidebarCollapsed(side);
+  canvasSetSidebarCollapsed(side, collapsed);
+  const el = document.getElementById(`canvas-sidebar-${side}`);
+  if (!el) return;
+  el.classList.toggle('collapsed', collapsed);
+  // An inline width would override the `.collapsed` CSS rule's fixed width
+  // (inline beats a class selector) — so clear it on collapse (let the class
+  // win) and restore the saved width on expand (round 7 Part 6).
+  if (collapsed) el.style.width = '';
+  else el.style.width = canvasSidebarWidth(side) + 'px';
+  const btn = el.querySelector('[data-action="canvas-toggle-sidebar"]');
+  if (btn) {
+    btn.title = collapsed ? 'Expand' : 'Collapse';
+    btn.innerHTML = canvasSidebarToggleIcon(collapsed);
+  }
+}
+
+/* ---- item content (thumbnail card vs. inline image) ---- */
+
+function canvasItemRefData(state, item) {
+  // Round 9: one note per concept (item #0) — resolve by PRESENCE, not strict id
+  // equality. A regenerated/retried note gets a new id; the old id-equality check
+  // then left the persisted note item's stale ref.id unresolvable → the item
+  // unmounted and any connector anchored to it (e.g. a pinned convo's arrow)
+  // silently vanished (and could be permanently dropped by a refresh). Matching
+  // on presence keeps item #0 (and its connectors) alive across regeneration.
+  if (item.ref.type === 'note') return state.note ? { kind: 'note', obj: state.note } : null;
+  if (item.ref.type === 'canvas-file') {
+    const obj = state.filesById.get(item.ref.id);
+    return obj ? { kind: 'canvas-file', obj } : null;
+  }
+  // Phase C / round 6: a pinned AI conversation — the whole thread lives
+  // directly in the ref (no backing table row to look up), so this always
+  // resolves and the card round-trips through canvasLayoutDoc with no other
+  // state needed. Round 6 shape: {type:'ai', title, thread:[{role,text}…],
+  // conceptId}. Backward-compat: normalize a round-5 legacy ref
+  // ({type:'ai', question, answer}, no .thread) into a synthesized 1-turn
+  // thread + a derived title — never written back here (openAiConversation
+  // does that, in place, the first time a legacy card is actually opened).
+  if (item.ref.type === 'ai') {
+    const ref = item.ref;
+    if (Array.isArray(ref.thread)) {
+      return { kind: 'ai', obj: { title: ref.title || 'AI conversation', thread: ref.thread, conceptId: ref.conceptId, created_at: ref.created_at || 0 } };
+    }
+    const question = ref.question || '';
+    const answer = ref.answer || '';
+    const words = question.trim().split(/\s+/).filter(Boolean).slice(0, 6);
+    return {
+      kind: 'ai',
+      obj: {
+        title: words.length ? words.join(' ') : 'AI answer',
+        thread: [{ role: 'user', text: question }, { role: 'assistant', text: answer }],
+        conceptId: state.conceptId,
+        created_at: ref.created_at || 0, // legacy (round 5) ref predates created_at
+      },
+    };
+  }
+  // Phase 2b: an in-flight (or failed) drag-drop / "+ Add file" upload — a
+  // purely client-side placeholder never written to canvas_files, so it has
+  // no backing row to look up. `canvasLayoutDoc` excludes these from what
+  // gets persisted (§ below), so this ref only ever exists transiently.
+  if (item.ref.type === 'uploading') return { kind: 'uploading', obj: { name: item.ref.name, phase: item.ref.phase || 'uploading', error: item.ref.error } };
+  return null;
+}
+
+function canvasSpinnerHtml() {
+  return '<span class="canvas-item-spinner"></span>';
+}
+
+function canvasItemContentHtml(refKind, obj) {
+  if (refKind === 'uploading') {
+    if (obj.phase === 'failed') {
+      return `<div class="canvas-item-thumb"><div class="canvas-item-thumb-placeholder canvas-item-error" title="${esc(obj.error || '')}">Failed</div></div><div class="canvas-item-label">${esc(obj.name)}</div>`;
+    }
+    return `<div class="canvas-item-thumb"><div class="canvas-item-thumb-placeholder">${canvasSpinnerHtml()}</div></div><div class="canvas-item-label">${esc(obj.name)} &middot; uploading&hellip;</div>`;
+  }
+  if (refKind === 'note') {
+    if (obj.status === 'compiled') {
+      const thumb = obj.has_thumb
+        ? `<img src="/api/notes/${obj.id}/thumb" alt="" draggable="false" class="canvas-item-thumb-img">`
+        : `<div class="canvas-item-thumb-placeholder">PDF</div>`;
+      return `<div class="canvas-item-thumb">${thumb}</div><div class="canvas-item-label">${esc(obj.title || 'Note')}</div>`;
+    }
+    if (obj.status === 'failed') {
+      return `<div class="canvas-item-thumb"><div class="canvas-item-thumb-placeholder canvas-item-error">Compile failed</div></div><div class="canvas-item-label">${esc(obj.title || 'Note')}</div>`;
+    }
+    return `<div class="canvas-item-thumb"><div class="canvas-item-thumb-placeholder">${canvasSpinnerHtml()}</div></div><div class="canvas-item-label">${esc(obj.title || 'Note')} &middot; generating&hellip;</div>`;
+  }
+  if (refKind === 'ai') {
+    // Round 6: a clean, openable summary card — title + message count + a
+    // short PLAIN-text preview (not markdown/rich-rendered "at rest"; that
+    // only happens once you open the full conversation — see
+    // openAiConversation). No raw dump of the answer text here.
+    const thread = obj.thread || [];
+    const count = thread.length;
+    const firstUser = thread.find((t) => t.role === 'user');
+    const firstAssistant = thread.find((t) => t.role === 'assistant');
+    let previewSrc = (firstUser ? firstUser.text : (firstAssistant ? firstAssistant.text : '')) || '';
+    previewSrc = previewSrc.replace(/\s+/g, ' ').trim();
+    const preview = previewSrc.length > 140 ? previewSrc.slice(0, 140) + '…' : previewSrc;
+    // Round 8 item 4: deliberately louder than a plain file card (accent
+    // header bar + bigger/bolder title + an explicit CTA, not just a subtle
+    // hint) so a pinned conversation stands out on a board full of files —
+    // see the .canvas-ai-card* rules in canvas.css.
+    return `<div class="canvas-ai-card">
+      <div class="canvas-ai-header">
+        <span class="canvas-ai-header-icon">&#10024;</span>
+        <span class="canvas-ai-title">${esc(obj.title || 'AI conversation')}</span>
+      </div>
+      <div class="canvas-ai-subline">AI CONVERSATION &middot; ${count} message${count === 1 ? '' : 's'}</div>
+      <div class="canvas-ai-preview">${preview ? esc(preview) : '<span class="canvas-ai-preview-empty">No messages yet</span>'}</div>
+      <div class="canvas-ai-open-hint">Open conversation &rsaquo;</div>
+    </div>`;
+  }
+  // canvas-file
+  if (obj.kind === 'image') {
+    return `<div class="canvas-item-image"><img src="/api/canvas-files/${obj.id}/raw" alt="" draggable="false" class="canvas-item-image-img"></div><div class="canvas-item-label">${esc(obj.display_name)}</div>`;
+  }
+  if (obj.status === 'converting') {
+    return `<div class="canvas-item-thumb"><div class="canvas-item-thumb-placeholder">${canvasSpinnerHtml()}</div></div><div class="canvas-item-label">${esc(obj.display_name)} &middot; converting&hellip;</div>`;
+  }
+  if (obj.status === 'failed') {
+    return `<div class="canvas-item-thumb"><div class="canvas-item-thumb-placeholder canvas-item-error" title="${esc(obj.error_message || '')}">Failed</div></div><div class="canvas-item-label">${esc(obj.display_name)}</div>`;
+  }
+  const thumb = `<img src="/api/canvas-files/${obj.id}/thumb" alt="" draggable="false" class="canvas-item-thumb-img">`;
+  return `<div class="canvas-item-thumb">${thumb}</div><div class="canvas-item-label">${esc(obj.display_name)}</div>`;
+}
+
+function canvasItemIsClickable(refKind, obj) {
+  if (refKind === 'uploading') return false;
+  if (refKind === 'note') return obj.status === 'compiled';
+  if (refKind === 'ai') return true; // round 6: opens the conversation overlay (canvasOpenItem)
+  if (obj.kind === 'image') return true;
+  return obj.status === 'ready';
+}
+
+/* ---- mounting + interaction (select / move / resize / open) ---- */
+
+// A small hover ✕ to remove an item (Phase 2b §3). Never shown for the
+// lesson's own note (item #0) — that one isn't deletable from the canvas.
+function canvasItemCloseBtnHtml(refKind, itemId) {
+  if (refKind === 'note') return '';
+  return `<button type="button" class="canvas-item-close" data-action="canvas-item-delete" data-item-id="${itemId}" title="Remove">&times;</button>`;
+}
+
+// Rebuilds an item's inner content (thumb/image/spinner/error + label + the
+// resize handle + the close button) from its current ref data. Used both at
+// first mount and to refresh in place after an upload/poll/rename changes
+// what an item points at, without tearing down the element (keeps its drag
+// listeners + selection state intact).
+function canvasSetItemContent(el, refKind, obj) {
+  el.innerHTML = canvasItemCloseBtnHtml(refKind, el.dataset.itemId)
+    + canvasItemContentHtml(refKind, obj)
+    + '<div class="canvas-item-resize" title="Resize"></div>';
+  // Thumbnails can 404 (no thumb yet / render failed) — fall back to a plain
+  // type-tag placeholder rather than a broken-image glyph.
+  const thumbImg = el.querySelector('.canvas-item-thumb-img');
+  if (thumbImg) {
+    thumbImg.addEventListener('error', () => {
+      const div = document.createElement('div');
+      div.className = 'canvas-item-thumb-placeholder';
+      div.textContent = refKind === 'note' ? 'PDF' : (obj.kind || 'FILE').toUpperCase();
+      thumbImg.replaceWith(div);
+    }, { once: true });
+  }
+}
+
+function canvasMountItem(state, item) {
+  const ref = canvasItemRefData(state, item);
+  if (!ref) return; // ref points at a deleted note/canvas-file — dropped per CANVAS.md §4.3
+  const el = document.createElement('div');
+  el.className = 'canvas-item';
+  el.dataset.itemId = item.id;
+  el.style.left = item.x + 'px';
+  el.style.top = item.y + 'px';
+  el.style.width = item.w + 'px';
+  el.style.height = item.h + 'px';
+  el.style.zIndex = String(item.z || 1);
+  canvasSetItemContent(el, ref.kind, ref.obj);
+  state.worldEl.appendChild(el);
+  // (round 6: the 'ai' card's at-rest preview is plain text, not markdown/
+  // KaTeX — no renderMath needed here any more; the full formatted thread
+  // only renders once the conversation overlay opens.)
+
+  const entry = { data: item, el, refKind: ref.kind, refObj: ref.obj, clickable: canvasItemIsClickable(ref.kind, ref.obj) };
+  state.itemsById.set(item.id, entry);
+  canvasWireItemInteraction(state, item.id);
+}
+
+// Re-derives an item's ref (e.g. an 'uploading' placeholder that just got its
+// real canvas-file id, or a canvas-file whose status flipped converting→ready
+// on a poll tick) and repaints its content in place.
+function canvasRefreshItem(state, itemId) {
+  const entry = state.itemsById.get(itemId);
+  if (!entry) return;
+  const ref = canvasItemRefData(state, entry.data);
+  if (!ref) {
+    // Round 9: a note item (#0) must NEVER be auto-removed by a refresh — that
+    // would also drop its connectors (canvasRemoveItemFromDom → canvasDropConnectorsForItem)
+    // and persist the deletion. Only genuinely deletable refs (canvas-file /
+    // uploading placeholder) are cleaned up here; explicit user deletes go
+    // through canvasRequestDeleteItem.
+    if (entry.data.ref && entry.data.ref.type === 'note') return;
+    canvasRemoveItemFromDom(state, itemId); // ref now points at something deleted
+    return;
+  }
+  entry.refKind = ref.kind;
+  entry.refObj = ref.obj;
+  entry.clickable = canvasItemIsClickable(ref.kind, ref.obj);
+  canvasSetItemContent(entry.el, ref.kind, ref.obj);
+}
+
+function canvasRemoveItemFromDom(state, itemId) {
+  const entry = state.itemsById.get(itemId);
+  if (!entry) return;
+  entry.el.remove();
+  state.itemsById.delete(itemId);
+  if (state.selectedId === itemId) state.selectedId = null;
+  // Phase 3: this is the single choke point where an item stops existing on
+  // the board (delete-file confirm, an 'uploading' placeholder removal, and
+  // canvasRefreshItem's "ref now points at something deleted" cleanup all
+  // funnel through here) — so drop any connector anchored to it here too
+  // (CANVAS.md §4.3: "deleting an item must drop any connectors referencing it").
+  if (state.pendingConnectorFrom === itemId) canvasConnectorCancel(state);
+  if (canvasDropConnectorsForItem(state, itemId)) markCanvasDirty(state);
+}
+
+function canvasNextZ(state) {
+  let maxZ = 0;
+  state.itemsById.forEach((en) => { maxZ = Math.max(maxZ, en.data.z || 0); });
+  return maxZ + 1;
+}
+
+// Reverse lookup: which item (if any) currently places this note/canvas-file
+// on the board — used by the file-container sidebar's "click → pan" (§8.3).
+function canvasFindItemIdByRef(state, refType, refId) {
+  for (const [id, entry] of state.itemsById) {
+    if (entry.data.ref && entry.data.ref.type === refType && entry.data.ref.id === refId) return id;
+  }
+  // Round 9: a note's persisted ref.id can go stale after regeneration (new id).
+  // There's exactly one note item per canvas — fall back to it so the poll/refresh
+  // path still locates item #0 instead of concluding "deleted".
+  if (refType === 'note') {
+    for (const [id, entry] of state.itemsById) {
+      if (entry.data.ref && entry.data.ref.type === 'note') return id;
+    }
+  }
+  return null;
+}
+
+function canvasSelectItem(state, itemId) {
+  if (state.selectedId && state.selectedId !== itemId) {
+    const prev = state.itemsById.get(state.selectedId);
+    if (prev) prev.el.classList.remove('selected');
+  }
+  state.selectedId = itemId;
+  const entry = state.itemsById.get(itemId);
+  if (!entry) return;
+  entry.el.classList.add('selected');
+  // bring-to-front on select
+  let maxZ = 0;
+  state.itemsById.forEach((en) => { maxZ = Math.max(maxZ, en.data.z || 0); });
+  if ((entry.data.z || 0) < maxZ) {
+    entry.data.z = maxZ + 1;
+    entry.el.style.zIndex = String(entry.data.z);
+    markCanvasDirty(state);
+  }
+}
+
+function canvasClearSelection(state) {
+  if (!state.selectedId) return;
+  const prev = state.itemsById.get(state.selectedId);
+  if (prev) prev.el.classList.remove('selected');
+  state.selectedId = null;
+}
+
+// Round 8 item 3: the single place that propagates a lesson (concept) rename
+// everywhere the canvas shows its name — factored out of canvasOpenItem's
+// note branch (the reader's title-edit `onRenamed`) so the new Files-sidebar
+// rename pencil (canvasRenameNoteModal) can reuse the exact same fan-out
+// instead of duplicating it. `name` is already persisted server-side
+// (PATCH /concepts/:id — updates concepts.name + notes.title; the list/
+// schedule/quiz read concepts.name live) by the time this runs.
+function canvasApplyConceptRename(state, name) {
+  if (state.concept) state.concept.name = name;
+  if (state.note) state.note.title = name;
+  const c = state.concepts && state.concepts.find((x) => x.id === state.conceptId);
+  if (c) c.name = name;
+  canvasRenderLessonControls(state);
+  canvasRenderFileList(state);
+  const noteItemId = state.note ? canvasFindItemIdByRef(state, 'note', state.note.id) : null;
+  if (noteItemId && state.itemsById.has(noteItemId)) canvasRefreshItem(state, noteItemId);
+  const titleEl = document.querySelector('.canvas-topbar-title');
+  if (titleEl) titleEl.textContent = name;
+  const rowLabel = document.querySelector(`.canvas-lesson-row[data-concept-id="${state.conceptId}"] .truncate`);
+  if (rowLabel) rowLabel.textContent = name;
+}
+
+function canvasOpenItem(state, entry) {
+  if (entry.refKind === 'note') {
+    // The lesson note's title IS the concept name — editing it renames the whole
+    // lesson (concept + note) everywhere (PATCH /concepts/:id updates concepts.name
+    // + notes.title; the list/schedule/quiz read concepts.name live).
+    openReader({
+      id: entry.refObj.id,
+      title: entry.refObj.title,
+      has_thumb: entry.refObj.has_thumb,
+      renameUrl: `/concepts/${state.conceptId}`,
+      onRenamed: (name) => canvasApplyConceptRename(state, name),
+    }, {
+      conceptId: state.conceptId,
+      conceptName: state.concept && state.concept.name,
+      conceptSummary: state.concept && state.concept.summary,
+      sourceItemId: entry.data.id,
+    });
+    return;
+  }
+  if (entry.refKind === 'ai') { openAiConversation(entry); return; }
+  const f = entry.refObj;
+  if (f.kind === 'image') { canvasOpenLightbox(f, entry.data.id); return; }
+  openReader({
+    id: f.id,
+    title: f.display_name,
+    pdfUrl: `/api/canvas-files/${f.id}/pdf`,
+    annGetUrl: `/canvas-files/${f.id}/annotations`,
+    annPutUrl: `/canvas-files/${f.id}/annotations`,
+    renameUrl: `/canvas-files/${f.id}`,
+    onRenamed: (name) => {
+      f.display_name = name;
+      const inState = state.filesById.get(f.id);
+      if (inState) inState.display_name = name;
+      const itemId = canvasFindItemIdByRef(state, 'canvas-file', f.id);
+      if (itemId) canvasRefreshItem(state, itemId);
+      canvasRenderFileList(state);
+    },
+  }, {
+    conceptId: state.conceptId,
+    conceptName: state.concept && state.concept.name,
+    conceptSummary: state.concept && state.concept.summary,
+    sourceItemId: entry.data.id,
+  });
+}
+
+function canvasWireItemInteraction(state, itemId) {
+  const entry = state.itemsById.get(itemId);
+  if (!entry) return;
+  const el = entry.el;
+
+  el.addEventListener('pointerdown', (e) => {
+    if (canvasState !== state) return;
+    if (e.button !== 0 || state.spaceDown) return; // left-only item drag; space-drag pans instead
+    if (e.target.closest('.canvas-item-close')) return; // owned by the delegated click handler (delete)
+    // Phase 3: the connector tool picks items (click A, then B) instead of
+    // dragging/opening them; every other drawing tool should draw straight
+    // through an item (e.g. an arrow starting on top of a card), so just let
+    // the pointerdown bubble up to the canvas-level draw handler untouched.
+    if (state.tool === 'connector') {
+      e.stopPropagation();
+      canvasConnectorPick(state, itemId);
+      return;
+    }
+    if (state.tool !== 'select') return;
+    e.stopPropagation();
+    canvasSelectItem(state, itemId);
+    // Live lookup (not captured at wire-time): canvasRefreshItem() rebuilds
+    // this element's innerHTML (upload finishing, a status poll, a rename),
+    // which replaces the resize-handle node — a stale reference here would
+    // silently break resizing on any item that's ever been refreshed.
+    const handle = el.querySelector('.canvas-item-resize');
+    const isResize = e.target === handle;
+    const startClientX = e.clientX, startClientY = e.clientY;
+    const start = { x: entry.data.x, y: entry.data.y, w: entry.data.w, h: entry.data.h };
+    let moved = false;
+    try { el.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    const onMove = (ev) => {
+      const dxs = ev.clientX - startClientX, dys = ev.clientY - startClientY;
+      if (Math.abs(dxs) > 3 || Math.abs(dys) > 3) moved = true;
+      const dx = dxs / state.scale, dy = dys / state.scale;
+      if (isResize) {
+        entry.data.w = Math.max(140, start.w + dx);
+        entry.data.h = Math.max(110, start.h + dy);
+        el.style.width = entry.data.w + 'px';
+        el.style.height = entry.data.h + 'px';
+      } else {
+        entry.data.x = start.x + dx;
+        entry.data.y = start.y + dy;
+        el.style.left = entry.data.x + 'px';
+        el.style.top = entry.data.y + 'px';
+      }
+      canvasUpdateConnectors(state); // Phase 3: keep any attached connector anchored live during drag/resize
+    };
+    const onUp = () => {
+      el.removeEventListener('pointermove', onMove);
+      el.removeEventListener('pointerup', onUp);
+      el.removeEventListener('pointercancel', onUp);
+      if (moved) markCanvasDirty(state);
+      else if (entry.clickable) canvasOpenItem(state, entry);
+    };
+    el.addEventListener('pointermove', onMove);
+    el.addEventListener('pointerup', onUp);
+    el.addEventListener('pointercancel', onUp);
+  });
+}
+
+/* ---- "Pin to canvas" — turn a reader "Ask AI" conversation into a card on
+   this lesson's board, connected by an arrow back to whatever item (the
+   PDF/note the reader was opened from). Called from readerAskPinToCanvas
+   when the student clicks the ask panel's single "📌 Pin to canvas" control.
+   Round 6: pins the WHOLE conversation (opts.thread), not just one answer
+   (supersedes Phase C's canvasPinAiAnswer(question, answer)). The thread
+   lives directly in the item's ref (canvasItemRefData's 'ai' branch), so it
+   persists via the ordinary canvasLayoutDoc/markCanvasDirty path — no new
+   endpoint, no new client-side collection. ---- */
+function canvasPinAiConversation(opts) {
+  if (!canvasState) { ui.toast('Open this lesson’s canvas to pin a conversation', 'error'); return; }
+  const state = canvasState;
+  const sourceItemId = opts.sourceItemId;
+  const src = sourceItemId ? state.itemsById.get(sourceItemId) : null;
+
+  // Round 8 item 4: bumped from the original 300x190 — the redesigned card's
+  // accent header + bigger title + CTA need more room to read comfortably.
+  const w = 380, h = 340;
+  let x, y;
+  if (src) {
+    x = src.data.x + src.data.w + 60;
+    y = src.data.y;
+  } else {
+    const center = canvasViewportCenterWorld(state);
+    x = center.x - w / 2;
+    y = center.y - h / 2;
+  }
+
+  const item = {
+    id: canvasNewItemId(),
+    ref: {
+      type: 'ai',
+      title: opts.title || 'AI conversation',
+      thread: opts.thread || [],
+      conceptId: opts.conceptId,
+      // Round 7: grounding = the page-context this convo started from (for
+      // continuity — canvasAiConvoSend); created_at = for the Files sidebar's
+      // "Conversations" group (listing/sort). Both optional/backward-compat.
+      grounding: opts.grounding || '',
+      created_at: Date.now(),
+    },
+    x, y, w, h,
+    z: canvasNextZ(state),
+  };
+  canvasSnapshotHistory(state);
+  canvasMountItem(state, item);
+
+  if (src) {
+    state.drawings.push({
+      id: canvasNewDrawingId(),
+      type: 'connector',
+      color: CANVAS_CONNECTOR_COLOR,
+      stroke: state.strokeWidth || CANVAS_STROKE_WIDTHS[0],
+      from: sourceItemId,
+      to: item.id,
+    });
+    canvasRenderVectors(state);
+  }
+
+  markCanvasDirty(state);
+  canvasRenderFileList(state); // round 7: the new convo shows up in the sidebar's "Conversations" group immediately
+  ui.toast('Pinned to canvas');
+}
+
+/* ---- AI conversation overlay (Build 9 round 6) ----
+   Opened by clicking a pinned 'ai' card (canvasOpenItem). A single,
+   body-mounted overlay (like the reader), but its own small stacking layer:
+   above the canvas, below app modals — canvas.css puts it at z-index 65
+   (reader 55 < pomodoro tray 60 < this 65 < auth gate 70 < modals 75 <
+   toasts 80). Reads/writes the item's ref DIRECTLY (entry.data.ref, not the
+   entry.refObj snapshot canvasItemRefData returns) so a continued
+   conversation persists through the normal canvasLayoutDoc save path; a
+   legacy round-5 {question,answer} ref is upgraded in place to the round-6
+   {title,thread,conceptId} shape the first time it's opened. */
+let aiConvoState = null; // { itemId, overlayEl, threadEl, inputEl, sendBtn, titleInput, controller, _keyHandler }
+
+function canvasAiAppendTurn(threadEl, turn) {
+  const wrap = document.createElement('div');
+  wrap.className = 'canvas-ai-turn canvas-ai-turn-' + (turn.role === 'user' ? 'user' : 'assistant');
+  if (turn.role === 'user') {
+    // Round 7 Part 2: show what the question was actually anchored to — the
+    // highlighted quote or the snip crop — above/with the question text.
+    // Backward-compat: a turn with no snippet (or a typed follow-up) renders
+    // exactly as before (just the escaped text).
+    let snippetHtml = '';
+    let mainText = turn.text || '';
+    if (turn.snippet && turn.snippet.kind === 'image' && turn.snippet.dataUrl) {
+      snippetHtml = `<img class="canvas-ai-snip" src="${turn.snippet.dataUrl}" alt="Snipped region" />`;
+    } else if (turn.snippet && turn.snippet.kind === 'text' && turn.snippet.text) {
+      const t = turn.snippet.text;
+      const truncated = t.length > 280 ? t.slice(0, 280) + '…' : t;
+      snippetHtml = `<blockquote class="canvas-ai-turn-snippet-quote">${esc(truncated)}</blockquote>`;
+      if (mainText === turn.snippet.text) mainText = ''; // it's the same text — don't repeat it below the quote
+    }
+    wrap.innerHTML = `<div class="canvas-ai-turn-bubble canvas-ai-turn-bubble-user">${snippetHtml}${mainText ? esc(mainText) : ''}</div>`;
+    threadEl.appendChild(wrap);
+    return wrap;
+  }
+  wrap.innerHTML = '<div class="canvas-ai-turn-bubble canvas-ai-turn-bubble-assistant"></div>';
+  threadEl.appendChild(wrap);
+  renderRichText(wrap.querySelector('.canvas-ai-turn-bubble-assistant'), turn.text || '');
+  return wrap;
+}
+
+function openAiConversation(entry) {
+  if (!canvasState || !entry) return;
+  closeAiConversation();
+  const state = canvasState;
+  const itemId = entry.data.id;
+
+  // Upgrade a legacy round-5 {question,answer} ref to the round-6
+  // {title,thread,conceptId} shape IN PLACE, once, so continuing the
+  // conversation persists correctly (canvasLayoutDoc serializes entry.data.ref
+  // verbatim — the normalized copy canvasItemRefData returns is not it).
+  let ref = entry.data.ref;
+  if (!Array.isArray(ref.thread)) {
+    const normalized = canvasItemRefData(state, entry.data);
+    ref = { type: 'ai', title: normalized.obj.title, thread: normalized.obj.thread.slice(), conceptId: normalized.obj.conceptId };
+    entry.data.ref = ref;
+    markCanvasDirty(state);
+  }
+
+  const overlay = document.createElement('div');
+  overlay.className = 'canvas-ai-overlay';
+  overlay.innerHTML = `
+    <div class="canvas-ai-overlay-panel" role="dialog" aria-modal="true">
+      <div class="canvas-ai-overlay-header">
+        <span class="canvas-ai-overlay-icon">&#10024;</span>
+        <input id="canvas-ai-title-input" class="canvas-ai-title-input" spellcheck="false" aria-label="Conversation title" value="${esc(ref.title || 'AI conversation')}" />
+        <button type="button" data-action="canvas-ai-close" title="Close (Esc)" class="icon-btn">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="canvas-ai-overlay-thread" id="canvas-ai-overlay-thread"></div>
+      <div class="canvas-ai-overlay-composer">
+        <textarea id="canvas-ai-overlay-input" class="canvas-ai-overlay-input" rows="1" placeholder="Continue this conversation…"></textarea>
+        <button type="button" id="canvas-ai-overlay-send" class="btn btn-primary canvas-ai-overlay-send-btn">Send</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add('canvas-ai-overlay-open'));
+
+  const threadEl = overlay.querySelector('#canvas-ai-overlay-thread');
+  const inputEl = overlay.querySelector('#canvas-ai-overlay-input');
+  const sendBtn = overlay.querySelector('#canvas-ai-overlay-send');
+  const titleInput = overlay.querySelector('#canvas-ai-title-input');
+
+  aiConvoState = { itemId, overlayEl: overlay, threadEl, inputEl, sendBtn, titleInput, controller: null, _keyHandler: null };
+
+  (ref.thread || []).forEach((turn) => canvasAiAppendTurn(threadEl, turn));
+  threadEl.scrollTop = threadEl.scrollHeight;
+
+  // Inline-renameable title — mirrors the reader's editable-title affordance
+  // (Enter/blur commits, Escape reverts + stops it reaching the Escape-closes
+  // handler below).
+  let committingTitle = false;
+  const commitTitle = () => {
+    if (committingTitle) return;
+    const entryNow = state.itemsById.get(itemId);
+    if (!entryNow) return;
+    const curRef = entryNow.data.ref;
+    const name = (titleInput.value || '').trim();
+    if (!name || name === curRef.title) { titleInput.value = curRef.title || 'AI conversation'; return; }
+    committingTitle = true;
+    curRef.title = name;
+    canvasRefreshItem(state, itemId);
+    canvasRenderFileList(state); // round 7: keep the sidebar's "Conversations" row name in sync
+    markCanvasDirty(state);
+    committingTitle = false;
+  };
+  titleInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); commitTitle(); titleInput.blur(); }
+    else if (e.key === 'Escape') {
+      e.stopPropagation();
+      const entryNow = state.itemsById.get(itemId);
+      titleInput.value = (entryNow && entryNow.data.ref.title) || 'AI conversation';
+      titleInput.blur();
+    }
+  });
+  titleInput.addEventListener('blur', commitTitle);
+
+  const send = () => canvasAiConvoSend(state, itemId);
+  sendBtn.addEventListener('click', send);
+  inputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+
+  const onKeyDown = (e) => { if (e.key === 'Escape') closeAiConversation(); };
+  document.addEventListener('keydown', onKeyDown);
+  aiConvoState._keyHandler = onKeyDown;
+  overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) closeAiConversation(); });
+}
+
+function closeAiConversation() {
+  if (!aiConvoState) return;
+  const st = aiConvoState;
+  aiConvoState = null;
+  if (st.controller) { try { st.controller.abort(); } catch (e) {} }
+  if (st._keyHandler) document.removeEventListener('keydown', st._keyHandler);
+  if (st.overlayEl) {
+    st.overlayEl.classList.remove('canvas-ai-overlay-open');
+    st.overlayEl.classList.add('canvas-ai-overlay-closing');
+    setTimeout(() => { st.overlayEl.remove(); }, 200);
+  }
+}
+
+// Continues the pinned conversation: streams a follow-up answer (grounded by
+// a truncated digest of the prior thread, capped well under the backend's
+// ~4000-char context limit), then persists both new turns onto the item's
+// ref (so canvasRefreshItem's card preview / "N messages" stays current and
+// the next debounced canvas save picks it up).
+async function canvasAiConvoSend(state, itemId) {
+  if (!aiConvoState || aiConvoState.itemId !== itemId) return;
+  const entry = state.itemsById.get(itemId);
+  if (!entry) return;
+  const ref = entry.data.ref;
+  const text = (aiConvoState.inputEl.value || '').trim();
+  if (!text) return;
+  aiConvoState.inputEl.value = '';
+  if (aiConvoState.controller) { try { aiConvoState.controller.abort(); } catch (e) {} }
+  const controller = new AbortController();
+  aiConvoState.controller = controller;
+
+  canvasAiAppendTurn(aiConvoState.threadEl, { role: 'user', text });
+  const assistantWrap = document.createElement('div');
+  assistantWrap.className = 'canvas-ai-turn canvas-ai-turn-assistant';
+  assistantWrap.innerHTML = '<div class="canvas-ai-turn-bubble canvas-ai-turn-bubble-assistant"><span class="reader-ask-loading">Thinking…</span></div>';
+  aiConvoState.threadEl.appendChild(assistantWrap);
+  aiConvoState.threadEl.scrollTop = aiConvoState.threadEl.scrollHeight;
+  const answerEl = assistantWrap.querySelector('.canvas-ai-turn-bubble-assistant');
+
+  // Round 7 Part 1: prepend the convo's stored `grounding` (the lesson-page
+  // text it started from) ahead of the prior-turns digest, so a reopened
+  // conversation stays on-topic even with the reader long closed — while
+  // keeping the combined context under the same ~3500-char budget as before.
+  const digest = (ref.thread || [])
+    .map((t) => (t.role === 'user' ? 'Q: ' : 'A: ') + (t.text || ''))
+    .join('\n');
+  let context;
+  if (ref.grounding) {
+    const groundingPart = ref.grounding + '\n\n';
+    const budget = Math.max(0, 3500 - groundingPart.length);
+    context = groundingPart + digest.slice(-budget);
+  } else {
+    context = digest.slice(-3500);
+  }
+
+  let acc = '';
+  try {
+    const full = await api.stream(`/concepts/${ref.conceptId}/ask`, { question: text, context }, (delta) => {
+      if (!aiConvoState || aiConvoState.controller !== controller) return; // superseded/closed mid-stream
+      acc += delta;
+      answerEl.textContent = acc;
+      aiConvoState.threadEl.scrollTop = aiConvoState.threadEl.scrollHeight;
+    }, { signal: controller.signal });
+    if (!aiConvoState || aiConvoState.controller !== controller) return;
+    const finalText = full || acc;
+    renderRichText(answerEl, finalText);
+    ref.thread = ref.thread || [];
+    ref.thread.push({ role: 'user', text });
+    ref.thread.push({ role: 'assistant', text: finalText });
+    canvasRefreshItem(state, itemId);
+    markCanvasDirty(state);
+  } catch (err) {
+    if (err && err.name === 'AbortError') return; // fired again / overlay closed — not a user-visible error
+    if (!aiConvoState || aiConvoState.controller !== controller) return;
+    answerEl.classList.add('reader-ask-error');
+    answerEl.textContent = 'Could not get an answer: ' + (err && err.message ? err.message : 'unknown error');
+  } finally {
+    if (aiConvoState && aiConvoState.controller === controller) aiConvoState.controller = null;
+  }
+}
+
+/* ---- image lightbox (Miro-style: always-visible inline image, click for a
+   larger view). Mounted on document.body below the reader's z-55. Extended
+   (round 7 Part 4) with an "Ask AI" / "Snip" toolbar so a raw dropped image
+   (a diagram/figure with no PDF/text layer, so the reader's own snip can't
+   reach it) can still be asked about — reusing the same multimodal
+   /concepts/:id/ask endpoint + renderRichText + canvasPinAiConversation the
+   reader's region-snip already uses (app.js ~2500-2605). ---- */
+
+let canvasLightboxEl = null;
+let canvasLightboxState = null; // { file, itemId, conceptId, overlayEl, stageEl, imgEl, panelEl, bodyEl,
+                                 //   pinBarEl, pinBtnEl, composerEl, inputEl, controller, snipping,
+                                 //   marqueeEl, thread }
+                                 // thread (round 8 item 1): {role,text,snippet?}[] — the WHOLE image
+                                 // conversation so far (mirrors the reader ask panel's ask.turns /
+                                 // the pinned-convo overlay's ref.thread), so Ask/Snip can be
+                                 // continued via a composer instead of only ever producing one Q/A.
+
+const CANVAS_LIGHTBOX_SNIP_MIN_PX = 8;        // ignore an accidental click / tiny drag
+const CANVAS_LIGHTBOX_ASK_MAX_OUTPUT = 1600;  // cap the long side (px) of any image sent to /ask
+
+function canvasCloseLightbox() {
+  if (!canvasLightboxEl) return;
+  if (canvasLightboxState && canvasLightboxState.controller) {
+    try { canvasLightboxState.controller.abort(); } catch (e) { /* ignore */ }
+  }
+  canvasLightboxEl.remove();
+  canvasLightboxEl = null;
+  canvasLightboxState = null;
+  document.removeEventListener('keydown', canvasLightboxKeyHandler);
+}
+
+function canvasLightboxKeyHandler(e) {
+  if (e.key === 'Escape') canvasCloseLightbox();
+}
+
+// `itemId` is the image's canvas item id (its board position) — passed by
+// canvasOpenItem so a pinned conversation can draw a connector back to it.
+function canvasOpenLightbox(file, itemId) {
+  canvasCloseLightbox();
+  const conceptId = canvasState && canvasState.conceptId;
+  const overlay = document.createElement('div');
+  overlay.className = 'canvas-lightbox';
+  overlay.innerHTML = `
+    <div class="canvas-lightbox-toolbar">
+      <button type="button" data-action="canvas-lightbox-ask" title="Ask AI about this image" class="btn btn-secondary canvas-lightbox-tool-btn">&#10024; Ask</button>
+      <button type="button" data-action="canvas-lightbox-snip" title="Snip a region to ask about" class="btn btn-secondary canvas-lightbox-tool-btn">Snip</button>
+    </div>
+    <button data-action="canvas-lightbox-close" title="Close (Esc)" class="icon-btn canvas-lightbox-close-btn">
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>
+    </button>
+    <div class="canvas-lightbox-stage" id="canvas-lightbox-stage">
+      <img src="/api/canvas-files/${file.id}/raw" alt="${esc(file.display_name)}" class="canvas-lightbox-img" id="canvas-lightbox-img">
+    </div>
+    <div class="canvas-lightbox-answer-panel" id="canvas-lightbox-answer-panel" hidden>
+      <div class="canvas-lightbox-answer-header">
+        <span class="canvas-lightbox-answer-title">&#10024; Ask AI</span>
+        <button type="button" data-action="canvas-lightbox-answer-close" title="Close" class="icon-btn">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="canvas-lightbox-answer-body" id="canvas-lightbox-answer-body"></div>
+      <div class="reader-ask-pin-bar" id="canvas-lightbox-pin-bar" hidden>
+        <button type="button" id="canvas-lightbox-pin-btn" data-action="canvas-lightbox-pin" class="reader-ask-pin-btn">📌 Pin to canvas</button>
+      </div>
+      <div class="reader-ask-composer" id="canvas-lightbox-composer" hidden>
+        <textarea id="canvas-lightbox-input" class="reader-ask-input" rows="1" placeholder="Ask a follow-up…"></textarea>
+        <button type="button" data-action="canvas-lightbox-send" class="btn btn-primary reader-ask-send-btn">Send</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) canvasCloseLightbox(); });
+  document.addEventListener('keydown', canvasLightboxKeyHandler);
+  canvasLightboxEl = overlay;
+
+  const state = {
+    file, itemId, conceptId,
+    overlayEl: overlay,
+    stageEl: overlay.querySelector('#canvas-lightbox-stage'),
+    imgEl: overlay.querySelector('#canvas-lightbox-img'),
+    panelEl: overlay.querySelector('#canvas-lightbox-answer-panel'),
+    bodyEl: overlay.querySelector('#canvas-lightbox-answer-body'),
+    pinBarEl: overlay.querySelector('#canvas-lightbox-pin-bar'),
+    pinBtnEl: overlay.querySelector('#canvas-lightbox-pin-btn'),
+    composerEl: overlay.querySelector('#canvas-lightbox-composer'),
+    inputEl: overlay.querySelector('#canvas-lightbox-input'),
+    controller: null,
+    snipping: false,
+    marqueeEl: null,
+    thread: [], // round 8 item 1: the whole image conversation so far (see the state comment above)
+  };
+  canvasLightboxState = state;
+  state.stageEl.addEventListener('pointerdown', (e) => canvasLightboxSnipPointerDown(state, e));
+  // Round 8 item 1: Enter sends the follow-up, Shift+Enter inserts a newline
+  // (mirrors the reader ask panel's composer, readerBuildAskUi).
+  state.inputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); canvasLightboxSendFollowUp(state); }
+  });
+}
+
+// Draws the <img> (same-origin — /api/canvas-files/:id/raw — so the canvas is
+// never tainted) to an offscreen canvas at its natural size (capped), for a
+// WHOLE-image ask.
+function canvasLightboxAskWhole(state) {
+  if (!state) return;
+  const img = state.imgEl;
+  if (!img || !img.naturalWidth) { ui.toast('Image not loaded yet', 'error'); return; }
+  const longSide = Math.max(img.naturalWidth, img.naturalHeight);
+  const scale = longSide > CANVAS_LIGHTBOX_ASK_MAX_OUTPUT ? CANVAS_LIGHTBOX_ASK_MAX_OUTPUT / longSide : 1;
+  const outW = Math.max(1, Math.round(img.naturalWidth * scale));
+  const outH = Math.max(1, Math.round(img.naturalHeight * scale));
+  const off = document.createElement('canvas');
+  off.width = outW; off.height = outH;
+  let dataUrl;
+  try {
+    off.getContext('2d').drawImage(img, 0, 0, outW, outH);
+    dataUrl = off.toDataURL('image/png');
+  } catch (e) {
+    ui.toast('Could not read this image', 'error');
+    return;
+  }
+  canvasLightboxFireAsk(state, dataUrl, 'Explain this image');
+}
+
+function canvasLightboxToggleSnip(state) {
+  if (!state) return;
+  if (state.snipping) { canvasLightboxCancelSnip(state); return; }
+  state.snipping = true;
+  state.overlayEl.classList.add('canvas-lightbox-snipping');
+  const btn = state.overlayEl.querySelector('[data-action="canvas-lightbox-snip"]');
+  if (btn) btn.classList.add('canvas-lightbox-tool-btn-active');
+}
+
+function canvasLightboxCancelSnip(state) {
+  if (!state) return;
+  state.snipping = false;
+  state.overlayEl.classList.remove('canvas-lightbox-snipping');
+  const btn = state.overlayEl.querySelector('[data-action="canvas-lightbox-snip"]');
+  if (btn) btn.classList.remove('canvas-lightbox-tool-btn-active');
+  if (state.marqueeEl) { state.marqueeEl.remove(); state.marqueeEl = null; }
+}
+
+// Delegated on the stage; a no-op unless snip mode is active. Mirrors the
+// reader's readerSnipPointerDown (marquee drag + pointer capture) — see
+// app.js ~2528.
+function canvasLightboxSnipPointerDown(state, e) {
+  if (!state.snipping) return;
+  const img = state.imgEl;
+  if (!img) return;
+  e.preventDefault();
+  const imgRect = img.getBoundingClientRect();
+  const stageRect = state.stageEl.getBoundingClientRect();
+  const marquee = document.createElement('div');
+  marquee.className = 'reader-snip-marquee canvas-lightbox-snip-marquee';
+  state.stageEl.appendChild(marquee);
+  state.marqueeEl = marquee;
+  const start = { x: e.clientX, y: e.clientY };
+  const clampRect = (curX, curY) => {
+    const x0 = Math.max(imgRect.left, Math.min(start.x, curX));
+    const x1 = Math.min(imgRect.right, Math.max(start.x, curX));
+    const y0 = Math.max(imgRect.top, Math.min(start.y, curY));
+    const y1 = Math.min(imgRect.bottom, Math.max(start.y, curY));
+    return { x0, y0, x1, y1 };
+  };
+  const paint = (r) => {
+    marquee.style.left = (r.x0 - stageRect.left) + 'px';
+    marquee.style.top = (r.y0 - stageRect.top) + 'px';
+    marquee.style.width = Math.max(0, r.x1 - r.x0) + 'px';
+    marquee.style.height = Math.max(0, r.y1 - r.y0) + 'px';
+  };
+  let last = clampRect(e.clientX, e.clientY);
+  paint(last);
+  const stage = state.stageEl;
+  try { stage.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+  const onMove = (ev) => { last = clampRect(ev.clientX, ev.clientY); paint(last); };
+  const cleanup = () => {
+    stage.removeEventListener('pointermove', onMove);
+    stage.removeEventListener('pointerup', onUp);
+    stage.removeEventListener('pointercancel', onCancel);
+  };
+  const onUp = () => { cleanup(); if (canvasLightboxState === state) canvasLightboxFinishSnip(state, imgRect, last); };
+  const onCancel = () => { cleanup(); if (canvasLightboxState === state) canvasLightboxCancelSnip(state); };
+  stage.addEventListener('pointermove', onMove);
+  stage.addEventListener('pointerup', onUp);
+  stage.addEventListener('pointercancel', onCancel);
+}
+
+// Maps the marquee (viewport px, relative to the <img> element's rendered
+// box) to the image's NATURAL pixels. Today the <img> has only
+// max-width/max-height (no fixed box), so its rendered box already equals its
+// content box with no letterboxing — but this still computes the
+// object-fit:contain content rect from naturalWidth/Height vs the element's
+// own client box (the general case), so the mapping stays correct even if
+// that ever changes (e.g. a fixed-size lightbox stage later).
+function canvasLightboxFinishSnip(state, imgRect, rect) {
+  const w = rect.x1 - rect.x0, h = rect.y1 - rect.y0;
+  canvasLightboxCancelSnip(state); // always exit snip mode + remove the marquee, whatever the outcome
+  if (w < CANVAS_LIGHTBOX_SNIP_MIN_PX || h < CANVAS_LIGHTBOX_SNIP_MIN_PX) return; // accidental click/tiny drag
+  const img = state.imgEl;
+  if (!img || !img.naturalWidth) return;
+  const boxW = imgRect.width, boxH = imgRect.height;
+  const natW = img.naturalWidth, natH = img.naturalHeight;
+  if (!boxW || !boxH) return;
+  const boxRatio = boxW / boxH, natRatio = natW / natH;
+  let contentW, contentH, contentLeft, contentTop;
+  if (natRatio > boxRatio) {
+    // the natural image is relatively wider than its box -> letterboxed top/bottom
+    contentW = boxW;
+    contentH = boxW / natRatio;
+    contentLeft = imgRect.left;
+    contentTop = imgRect.top + (boxH - contentH) / 2;
+  } else {
+    // the natural image is relatively taller -> letterboxed left/right
+    contentH = boxH;
+    contentW = boxH * natRatio;
+    contentTop = imgRect.top;
+    contentLeft = imgRect.left + (boxW - contentW) / 2;
+  }
+  const fracX = contentW ? (rect.x0 - contentLeft) / contentW : 0;
+  const fracY = contentH ? (rect.y0 - contentTop) / contentH : 0;
+  const fracW = contentW ? w / contentW : 0;
+  const fracH = contentH ? h / contentH : 0;
+  const sx = Math.max(0, Math.round(fracX * natW));
+  const sy = Math.max(0, Math.round(fracY * natH));
+  const sw = Math.max(1, Math.min(natW - sx, Math.round(fracW * natW)));
+  const sh = Math.max(1, Math.min(natH - sy, Math.round(fracH * natH)));
+  const longSide = Math.max(sw, sh);
+  const outScale = longSide > CANVAS_LIGHTBOX_ASK_MAX_OUTPUT ? CANVAS_LIGHTBOX_ASK_MAX_OUTPUT / longSide : 1;
+  const outW = Math.max(1, Math.round(sw * outScale));
+  const outH = Math.max(1, Math.round(sh * outScale));
+  const off = document.createElement('canvas');
+  off.width = outW; off.height = outH;
+  let dataUrl;
+  try {
+    off.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
+    dataUrl = off.toDataURL('image/png');
+  } catch (e) {
+    ui.toast('Could not read this image', 'error');
+    return;
+  }
+  canvasLightboxFireAsk(state, dataUrl, 'Explain this region');
+}
+
+// Streams an answer for a whole-image or snipped-region ask into the
+// lightbox's compact answer panel — reuses api.stream + renderRichText (the
+// same plumbing as the reader's ask panel, app.js ~2805 readerAskFire). Only
+// one ask streams at a time here: a new one aborts whatever's in flight.
+// Round 8 item 1: this is always the FIRST turn of a fresh topic (fired from
+// the "Ask"/"Snip" toolbar buttons, never from the composer) — it resets
+// state.thread and rebuilds the answer body from scratch, then reveals the
+// composer so the topic can be continued via canvasLightboxSendFollowUp.
+async function canvasLightboxFireAsk(state, dataUrl, userText) {
+  if (!state || canvasLightboxState !== state) return;
+  if (state.controller) { try { state.controller.abort(); } catch (e) { /* ignore */ } }
+  const controller = new AbortController();
+  state.controller = controller;
+
+  state.thread = [];
+  state.panelEl.hidden = false;
+  state.pinBarEl.hidden = true;
+  if (state.composerEl) state.composerEl.hidden = true;
+  state.bodyEl.innerHTML = `
+    <div class="reader-ask-bubble reader-ask-bubble-q">${esc(userText)}</div>
+    <div class="reader-ask-bubble reader-ask-bubble-a"><span class="reader-ask-loading">Thinking&hellip;</span></div>`;
+  const answerEl = state.bodyEl.querySelector('.reader-ask-bubble-a');
+
+  const context = (canvasState && canvasState.concept && canvasState.concept.summary) || '';
+  const body = { image: dataUrl };
+  if (context) body.context = context;
+
+  let acc = '';
+  try {
+    const full = await api.stream(`/concepts/${state.conceptId}/ask`, body, (delta) => {
+      if (canvasLightboxState !== state || state.controller !== controller) return; // superseded/closed mid-stream
+      acc += delta;
+      answerEl.textContent = acc;
+    }, { signal: controller.signal });
+    if (canvasLightboxState !== state || state.controller !== controller) return;
+    const finalText = full || acc;
+    renderRichText(answerEl, finalText);
+    state.thread = [
+      { role: 'user', text: userText, snippet: { kind: 'image', dataUrl } },
+      { role: 'assistant', text: finalText },
+    ];
+    state.pinBarEl.hidden = false;
+    if (state.pinBtnEl) { state.pinBtnEl.disabled = false; state.pinBtnEl.textContent = '📌 Pin to canvas'; }
+    if (state.composerEl) state.composerEl.hidden = false;
+  } catch (err) {
+    if (err && err.name === 'AbortError') return; // fired again / lightbox closed — not a user-visible error
+    if (canvasLightboxState !== state || state.controller !== controller) return;
+    answerEl.classList.add('reader-ask-error');
+    answerEl.textContent = 'Could not get an answer: ' + (err && err.message ? err.message : 'unknown error');
+  } finally {
+    if (state.controller === controller) state.controller = null;
+  }
+}
+
+// Round 8 item 1: continues the image conversation from the composer — mirrors
+// canvasAiConvoSend's follow-up shape (a truncated digest of the thread so
+// far as `context`, no new image upload). Appends both turns to state.thread
+// once the answer settles so the eventual "Pin to canvas" (canvasLightboxPin)
+// carries the WHOLE conversation, not just the first Q/A.
+async function canvasLightboxSendFollowUp(state) {
+  if (!state || canvasLightboxState !== state || !state.inputEl) return;
+  const text = (state.inputEl.value || '').trim();
+  if (!text) { state.inputEl.focus(); return; }
+  state.inputEl.value = '';
+  if (state.controller) { try { state.controller.abort(); } catch (e) { /* ignore */ } }
+  const controller = new AbortController();
+  state.controller = controller;
+
+  const qEl = document.createElement('div');
+  qEl.className = 'reader-ask-bubble reader-ask-bubble-q';
+  qEl.textContent = text;
+  state.bodyEl.appendChild(qEl);
+  const aEl = document.createElement('div');
+  aEl.className = 'reader-ask-bubble reader-ask-bubble-a';
+  aEl.innerHTML = '<span class="reader-ask-loading">Thinking&hellip;</span>';
+  state.bodyEl.appendChild(aEl);
+  state.bodyEl.scrollTop = state.bodyEl.scrollHeight;
+
+  // Digest of the conversation so far — same ~3500-char budget as
+  // canvasAiConvoSend's continuation of a pinned conversation.
+  const digest = (state.thread || [])
+    .map((t) => (t.role === 'user' ? 'Q: ' : 'A: ') + (t.text || ''))
+    .join('\n');
+  const context = digest.slice(-3500);
+
+  let acc = '';
+  try {
+    const full = await api.stream(`/concepts/${state.conceptId}/ask`, { question: text, context }, (delta) => {
+      if (canvasLightboxState !== state || state.controller !== controller) return;
+      acc += delta;
+      aEl.textContent = acc;
+      state.bodyEl.scrollTop = state.bodyEl.scrollHeight;
+    }, { signal: controller.signal });
+    if (canvasLightboxState !== state || state.controller !== controller) return;
+    const finalText = full || acc;
+    renderRichText(aEl, finalText);
+    state.thread = state.thread || [];
+    state.thread.push({ role: 'user', text });
+    state.thread.push({ role: 'assistant', text: finalText });
+    state.pinBarEl.hidden = false;
+    if (state.pinBtnEl) { state.pinBtnEl.disabled = false; state.pinBtnEl.textContent = '📌 Pin to canvas'; }
+  } catch (err) {
+    if (err && err.name === 'AbortError') return;
+    if (canvasLightboxState !== state || state.controller !== controller) return;
+    aEl.classList.add('reader-ask-error');
+    aEl.textContent = 'Could not get an answer: ' + (err && err.message ? err.message : 'unknown error');
+  } finally {
+    if (state.controller === controller) state.controller = null;
+  }
+}
+
+function canvasLightboxCloseAnswerPanel(state) {
+  if (!state) return;
+  if (state.controller) { try { state.controller.abort(); } catch (e) { /* ignore */ } state.controller = null; }
+  state.panelEl.hidden = true;
+}
+
+// Derives a title from the dropped image's own filename — no extra AI call
+// just to name the pin (per the round-7 spec: "Title without an extra AI call").
+function canvasLightboxTitleFromFileName(displayName) {
+  const name = (displayName || '').trim();
+  if (!name) return 'Image question';
+  const dot = name.lastIndexOf('.');
+  const base = dot > 0 ? name.slice(0, dot) : name;
+  return base.trim() || 'Image question';
+}
+
+// Round 8 item 1: pins the WHOLE image conversation (every turn accumulated
+// via Ask/Snip + any composer follow-ups), not just the first answer.
+function canvasLightboxPin(state) {
+  if (!state || !state.thread || !state.thread.length) return;
+  if (!canvasState) { ui.toast('Open this lesson’s canvas to pin a conversation', 'error'); return; }
+  const btn = state.pinBtnEl;
+  if (btn) { if (btn.disabled) return; btn.disabled = true; btn.textContent = 'Pinning…'; }
+  const title = canvasLightboxTitleFromFileName(state.file && state.file.display_name);
+  canvasPinAiConversation({ title, thread: state.thread.slice(), conceptId: state.conceptId, sourceItemId: state.itemId, grounding: '', created_at: Date.now() });
+  if (btn) { btn.disabled = false; btn.textContent = '📌 Pin to canvas'; }
+}
+
+/* ---- drag-drop / "+ Add file" upload + convert-status polling (Phase 2b §1) ----
+   A placeholder item mounts immediately (ref.type:'uploading') so the drop
+   feels instant; once POST resolves we swap its ref to the real canvas-file
+   id and — for docx/pptx — poll the board until status leaves 'converting'. */
+
+function canvasViewportCenterWorld(state) {
+  const rect = state.scrollEl.getBoundingClientRect();
+  return canvasScreenToWorld(state, rect.width / 2, rect.height / 2);
+}
+
+async function canvasUploadFile(state, file, worldX, worldY) {
+  const itemId = canvasNewItemId();
+  const item = {
+    id: itemId,
+    ref: { type: 'uploading', name: file.name, phase: 'uploading' },
+    x: Math.round(worldX), y: Math.round(worldY), w: 360, h: 480,
+    z: canvasNextZ(state),
+  };
+  canvasMountItem(state, item);
+
+  const fd = new FormData();
+  fd.append('file', file);
+  let row;
+  try {
+    row = await api.upload(`/concepts/${state.conceptId}/canvas/files`, fd);
+  } catch (e) {
+    if (canvasState !== state) return; // canvas closed while uploading — nothing left to update
+    const entry = state.itemsById.get(itemId);
+    if (entry) {
+      entry.data.ref = { type: 'uploading', name: file.name, phase: 'failed', error: e.message };
+      canvasRefreshItem(state, itemId);
+    }
+    ui.toast(`${file.name}: ${e.message || 'Upload failed'}`, 'error');
+    return;
+  }
+  if (canvasState !== state) return; // canvas closed mid-upload — the file is saved server-side either way
+
+  state.filesById.set(row.id, row);
+  const existingIdx = state.files.findIndex((f) => f.id === row.id);
+  if (existingIdx === -1) state.files.push(row); else state.files[existingIdx] = row;
+
+  const entry = state.itemsById.get(itemId);
+  if (entry) {
+    entry.data.ref = { type: 'canvas-file', id: row.id };
+    canvasRefreshItem(state, itemId);
+  }
+  markCanvasDirty(state); // now safe to persist — the item's ref points at a real row
+  canvasRenderFileList(state);
+
+  if (row.status === 'converting') canvasPollFile(state, row.id, itemId);
+}
+
+// Polls the board's file list until this file's status leaves 'converting'
+// (→ 'ready' flips it to a real thumbnail card; → 'failed' shows the reason).
+// Stops itself if the canvas is closed/switched, the item was deleted, or the
+// attempt cap is hit (a stuck LibreOffice conversion shouldn't poll forever).
+function canvasPollFile(state, fileId, itemId, attempt = 0) {
+  setTimeout(async () => {
+    if (canvasState !== state) return;
+    if (!state.itemsById.has(itemId)) return; // item removed (deleted) while converting
+    let data;
+    try {
+      data = await api.get(`/concepts/${state.conceptId}/canvas`);
+    } catch (e) {
+      // transient failure — keep trying up to the attempt cap rather than
+      // giving up on a single blip
+      if (attempt + 1 < CANVAS_POLL_MAX_ATTEMPTS) canvasPollFile(state, fileId, itemId, attempt + 1);
+      return;
+    }
+    if (canvasState !== state) return;
+    const file = (data.files || []).find((f) => f.id === fileId);
+    if (!file) return; // deleted server-side elsewhere — stop quietly
+    state.filesById.set(fileId, file);
+    const idx = state.files.findIndex((f) => f.id === fileId);
+    if (idx !== -1) state.files[idx] = file;
+
+    if (file.status === 'converting') {
+      if (attempt + 1 >= CANVAS_POLL_MAX_ATTEMPTS) {
+        ui.toast(`${file.display_name}: still converting — check back later.`, 'error');
+        return;
+      }
+      canvasPollFile(state, fileId, itemId, attempt + 1);
+      return;
+    }
+    // ready or failed — repaint the item + sidebar row once, then stop
+    if (state.itemsById.has(itemId)) canvasRefreshItem(state, itemId);
+    canvasRenderFileList(state);
+    markCanvasDirty(state);
+    if (file.status === 'failed') ui.toast(`${file.display_name}: ${file.error_message || 'Conversion failed'}`, 'error');
+  }, CANVAS_POLL_INTERVAL_MS);
+}
+
+function canvasHandleFileInputChange(state, fileList) {
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+  const center = canvasViewportCenterWorld(state);
+  files.forEach((f, i) => canvasUploadFile(state, f, center.x - 180 + i * 24, center.y - 130 + i * 24));
+}
+
+function canvasWireDropUpload(state) {
+  const scrollEl = state.scrollEl;
+  const onDragOver = (e) => {
+    if (canvasState !== state) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    scrollEl.classList.add('canvas-drop-hint');
+  };
+  const onDragLeave = (e) => {
+    if (e.target === scrollEl) scrollEl.classList.remove('canvas-drop-hint');
+  };
+  const onDrop = (e) => {
+    if (canvasState !== state) return;
+    e.preventDefault();
+    scrollEl.classList.remove('canvas-drop-hint');
+    const files = e.dataTransfer && e.dataTransfer.files ? Array.from(e.dataTransfer.files) : [];
+    if (!files.length) return;
+    const rect = scrollEl.getBoundingClientRect();
+    files.forEach((f, i) => {
+      const world = canvasScreenToWorld(state, e.clientX - rect.left + i * 24, e.clientY - rect.top + i * 24);
+      canvasUploadFile(state, f, world.x - 180, world.y - 130);
+    });
+  };
+  scrollEl.addEventListener('dragover', onDragOver);
+  scrollEl.addEventListener('dragleave', onDragLeave);
+  scrollEl.addEventListener('drop', onDrop);
+  return () => {
+    scrollEl.removeEventListener('dragover', onDragOver);
+    scrollEl.removeEventListener('dragleave', onDragLeave);
+    scrollEl.removeEventListener('drop', onDrop);
+  };
+}
+
+/* ---- file-container actions: smooth-pan / rename / delete (Phase 2b §2/§3) ---- */
+
+function canvasAnimatePan(state, targetTx, targetTy) {
+  if (state._panRaf) cancelAnimationFrame(state._panRaf);
+  const startTx = state.tx, startTy = state.ty, t0 = performance.now(), dur = 320;
+  const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+  const step = (now) => {
+    if (canvasState !== state) return;
+    const k = easeOutCubic(Math.min(1, (now - t0) / dur));
+    state.tx = startTx + (targetTx - startTx) * k;
+    state.ty = startTy + (targetTy - startTy) * k;
+    canvasApplyTransform(state);
+    if (k < 1) { state._panRaf = requestAnimationFrame(step); return; }
+    state._panRaf = null;
+    markCanvasDirty(state);
+  };
+  state._panRaf = requestAnimationFrame(step);
+}
+
+// Figma-style "click a file → center it": pans (keeping the current zoom) so
+// the item's center lands in the middle of the viewport, and selects it.
+function canvasPanToItem(state, itemId) {
+  const entry = itemId ? state.itemsById.get(itemId) : null;
+  if (!entry) { ui.toast('Not placed on the canvas yet', 'error'); return; }
+  const rect = state.scrollEl.getBoundingClientRect();
+  const cx = entry.data.x + entry.data.w / 2, cy = entry.data.y + entry.data.h / 2;
+  canvasSelectItem(state, itemId);
+  canvasAnimatePan(state, rect.width / 2 - cx * state.scale, rect.height / 2 - cy * state.scale);
+}
+
+// Round 8 item 3: rename the lesson's own note (item #0) from the Files
+// sidebar's rename pencil — same endpoint/field the reader's title-edit uses
+// (PATCH /concepts/:id, {display_name}), then fans the new name out via the
+// shared canvasApplyConceptRename (also used by the reader's onRenamed).
+function canvasRenameNoteModal(state) {
+  if (!state.concept) return;
+  const current = (state.note && state.note.title) || state.concept.name || 'Note';
+  ui.formModal({
+    title: 'Rename lesson',
+    submitLabel: 'Save',
+    bodyHtml: field('Name', `<input id="f-canvas-rename-note" class="${inputCls}" value="${esc(current)}" />`),
+    onSubmit: async (root) => {
+      const name = root.querySelector('#f-canvas-rename-note').value.trim();
+      if (!name) throw new Error('Please enter a name.');
+      await api.patch(`/concepts/${state.conceptId}`, { display_name: name });
+      if (canvasState !== state) return;
+      canvasApplyConceptRename(state, name);
+      ui.toast('Renamed');
+    },
+  });
+}
+
+function canvasRenameFileModal(state, fileId) {
+  const file = state.filesById.get(Number(fileId));
+  if (!file) return;
+  ui.formModal({
+    title: 'Rename file',
+    submitLabel: 'Save',
+    bodyHtml: field('Name', `<input id="f-canvas-rename" class="${inputCls}" value="${esc(file.display_name)}" />`),
+    onSubmit: async (root) => {
+      const name = root.querySelector('#f-canvas-rename').value.trim();
+      if (!name) throw new Error('Please enter a name.');
+      const updated = await api.patch(`/canvas-files/${file.id}`, { display_name: name });
+      if (canvasState !== state) return;
+      state.filesById.set(updated.id, updated);
+      const idx = state.files.findIndex((f) => f.id === updated.id);
+      if (idx !== -1) state.files[idx] = updated;
+      const itemId = canvasFindItemIdByRef(state, 'canvas-file', updated.id);
+      if (itemId) canvasRefreshItem(state, itemId);
+      canvasRenderFileList(state);
+      ui.toast('Renamed');
+    },
+  });
+}
+
+// Shared delete core for both entry points (on-canvas ✕ and the sidebar row's
+// delete control) — confirms, calls the API, then removes the item (if any)
+// and the sidebar row.
+function canvasConfirmDeleteFile(state, file, itemId) {
+  ui.confirmModal({
+    title: 'Remove file?',
+    message: `This removes "${file.display_name}" from this lesson's canvas. This can't be undone.`,
+    confirmLabel: 'Remove',
+    onConfirm: async () => {
+      await api.del(`/canvas-files/${file.id}`);
+      if (canvasState !== state) return;
+      state.filesById.delete(file.id);
+      state.files = state.files.filter((f) => f.id !== file.id);
+      if (itemId) canvasRemoveItemFromDom(state, itemId);
+      markCanvasDirty(state);
+      canvasRenderFileList(state);
+      ui.toast('File removed');
+    },
+  });
+}
+
+// Delete via the on-canvas item (✕ button or Delete/Backspace on selection).
+// The note (item #0) is never deletable from here — CANVAS.md §2/Phase 2b §3.
+// An 'uploading' placeholder has no server-side row yet, so it's just a local
+// removal (no confirm needed — nothing durable to lose). Same for Phase C's
+// 'ai' cards: the answer lives only in this lesson's canvas_layout row (never
+// its own canvas_files row — canvasItemRefData's 'ai' branch), so there's no
+// DELETE endpoint to call; canvasRemoveItemFromDom already drops its connector
+// and the next markCanvasDirty save simply omits it. Without this branch it
+// would fall through to canvasConfirmDeleteFile, which assumes every item has
+// a canvas_files row (file.id/file.display_name) and would 404.
+function canvasRequestDeleteItem(state, itemId) {
+  const entry = state.itemsById.get(itemId);
+  if (!entry) return;
+  if (entry.refKind === 'note') return;
+  if (entry.refKind === 'uploading' || entry.refKind === 'ai') {
+    canvasRemoveItemFromDom(state, itemId);
+    markCanvasDirty(state);
+    // Round 7: an 'ai' item may also be listed in the Files sidebar's
+    // "Conversations" group (deleted from the canvas ✕ or from that row) —
+    // keep the list in sync either way.
+    canvasRenderFileList(state);
+    return;
+  }
+  canvasConfirmDeleteFile(state, entry.refObj, itemId);
+}
+
+// Delete via the file-container sidebar row's delete control (has a fileId,
+// which may or may not currently have a placed item — either way it's deletable).
+function canvasRequestDeleteFile(state, fileId) {
+  const file = state.filesById.get(Number(fileId));
+  if (!file) return;
+  canvasConfirmDeleteFile(state, file, canvasFindItemIdByRef(state, 'canvas-file', file.id));
+}
+
+/* ---- world transform: screen <-> world, pan, zoom, fit-to-view (§3) ---- */
+
+function canvasApplyTransform(state) {
+  state.worldEl.style.transform = `translate(${state.tx}px, ${state.ty}px) scale(${state.scale})`;
+  const label = document.getElementById('canvas-zoom-level');
+  if (label) label.textContent = Math.round(state.scale * 100) + '%';
+}
+
+function canvasScreenToWorld(state, sx, sy) {
+  return { x: (sx - state.tx) / state.scale, y: (sy - state.ty) / state.scale };
+}
+
+function canvasZoomAt(state, factor, sx, sy) {
+  const before = canvasScreenToWorld(state, sx, sy);
+  state.scale = canvasClampScale(state.scale * factor);
+  state.tx = sx - before.x * state.scale;
+  state.ty = sy - before.y * state.scale;
+  canvasApplyTransform(state);
+  markCanvasDirty(state);
+}
+
+function canvasZoomCenter(state, factor) {
+  const rect = state.scrollEl.getBoundingClientRect();
+  canvasZoomAt(state, factor, rect.width / 2, rect.height / 2);
+}
+
+function canvasFitToView(state, persist = true) {
+  const rect = state.scrollEl.getBoundingClientRect();
+  const entries = Array.from(state.itemsById.values());
+  if (!entries.length) {
+    state.scale = 1;
+    state.tx = Math.max(40, rect.width / 2 - 260);
+    state.ty = 40;
+  } else {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    entries.forEach((en) => {
+      minX = Math.min(minX, en.data.x); minY = Math.min(minY, en.data.y);
+      maxX = Math.max(maxX, en.data.x + en.data.w); maxY = Math.max(maxY, en.data.y + en.data.h);
+    });
+    const pad = 60;
+    const bw = Math.max(1, maxX - minX), bh = Math.max(1, maxY - minY);
+    const s = canvasClampScale(Math.min((rect.width - pad * 2) / bw, (rect.height - pad * 2) / bh));
+    state.scale = s;
+    state.tx = rect.width / 2 - (minX + bw / 2) * s;
+    state.ty = rect.height / 2 - (minY + bh / 2) * s;
+  }
+  canvasApplyTransform(state);
+  if (persist) markCanvasDirty(state);
+}
+
+function canvasStartPan(state, e) {
+  e.preventDefault();
+  const scrollEl = state.scrollEl;
+  const startClientX = e.clientX, startClientY = e.clientY;
+  const startTx = state.tx, startTy = state.ty;
+  scrollEl.classList.add('panning');
+  try { scrollEl.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+  const onMove = (ev) => {
+    state.tx = startTx + (ev.clientX - startClientX);
+    state.ty = startTy + (ev.clientY - startClientY);
+    canvasApplyTransform(state);
+  };
+  const onUp = () => {
+    scrollEl.classList.remove('panning');
+    scrollEl.removeEventListener('pointermove', onMove);
+    scrollEl.removeEventListener('pointerup', onUp);
+    scrollEl.removeEventListener('pointercancel', onUp);
+    markCanvasDirty(state);
+  };
+  scrollEl.addEventListener('pointermove', onMove);
+  scrollEl.addEventListener('pointerup', onUp);
+  scrollEl.addEventListener('pointercancel', onUp);
+}
+
+function canvasWireEvents(state) {
+  const scrollEl = state.scrollEl;
+
+  const onPointerDown = (e) => {
+    if (canvasState !== state) return;
+    if (e.button === 1) { canvasStartPan(state, e); return; } // middle-mouse pan works over items too
+    if (e.button !== 0) return;
+    // Phase 3: any drawing tool takes over the canvas pointer surface instead
+    // of panning/selecting (CANVAS.md §9). Connector clicks on an item are
+    // handled by the item's own pointerdown (canvasWireItemInteraction) —
+    // bail out here so this handler doesn't also start a shape draw.
+    if (state.tool !== 'select') {
+      if (state.tool === 'connector') {
+        // Item clicks are handled by the item's OWN pointerdown
+        // (canvasWireItemInteraction → canvasConnectorPick). A click on empty
+        // canvas cancels any pending pick instead of starting a bogus shape.
+        if (!e.target.closest('.canvas-item')) canvasConnectorCancel(state);
+        return;
+      }
+      if (state.tool === 'eraser') { canvasEraserPointerDown(state, e); return; }
+      canvasStartShapeDraw(state, e);
+      return;
+    }
+    if (e.target.closest('.canvas-item')) return; // the item's own handler owns this drag
+    // In select mode, a pointerdown over a drawing (sticky/shape/text) moves it
+    // (or resizes it, if near its bottom-right corner). Hit-testing is done
+    // against the model in world coords — NOT the SVG element (which is
+    // pointer-events:none in select mode so item cards stay clickable).
+    const selRect = scrollEl.getBoundingClientRect();
+    const selWpt = canvasScreenToWorld(state, e.clientX - selRect.left, e.clientY - selRect.top);
+    const hitDrawing = canvasDrawingHitTest(state, selWpt);
+    if (hitDrawing) {
+      // Re-edit a text/sticky note on double-click. Detected HERE (on the scroll
+      // surface) rather than the note's foreignObject dblclick, because in select
+      // mode #canvas-vectors is pointer-events:none. Round 9: e.detail is NOT
+      // reliable here — the first click starts canvasStartDrawingManipulate which
+      // preventDefaults the pointerdown, resetting the browser's click-count so
+      // the 2nd pointerdown never reports detail>=2 (and the compat dblclick never
+      // fires either). So track the last hit drawing + time ourselves.
+      if (hitDrawing.type === 'text' || hitDrawing.type === 'sticky') {
+        const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        const last = state._lastDrawingClick;
+        if (last && last.id === hitDrawing.id && (now - last.t) < 400) {
+          state._lastDrawingClick = null;
+          e.preventDefault();
+          canvasEditDrawingText(state, hitDrawing);
+          return;
+        }
+        state._lastDrawingClick = { id: hitDrawing.id, t: now };
+      }
+      canvasStartDrawingManipulate(state, e, hitDrawing, selWpt);
+      return;
+    }
+    canvasClearSelection(state);
+    canvasStartPan(state, e); // drag on empty canvas (or space-drag) pans
+  };
+  scrollEl.addEventListener('pointerdown', onPointerDown);
+
+  const onWheel = (e) => {
+    if (canvasState !== state) return;
+    e.preventDefault();
+    const rect = scrollEl.getBoundingClientRect();
+    const factor = Math.pow(1.0015, -e.deltaY); // zoom toward the cursor
+    canvasZoomAt(state, factor, e.clientX - rect.left, e.clientY - rect.top);
+  };
+  scrollEl.addEventListener('wheel', onWheel, { passive: false });
+
+  const isTyping = () => {
+    const a = document.activeElement;
+    return !!a && (a.isContentEditable || ['input', 'textarea', 'select'].includes((a.tagName || '').toLowerCase()));
+  };
+  const onKeyDown = (e) => {
+    if (canvasState !== state || isTyping()) return;
+    if (e.code === 'Space') { state.spaceDown = true; scrollEl.classList.add('canvas-space'); return; }
+    if (e.key === '+' || e.key === '=') { e.preventDefault(); canvasZoomCenter(state, 1.2); return; }
+    if (e.key === '-') { e.preventDefault(); canvasZoomCenter(state, 1 / 1.2); return; }
+    if (e.key === '0') { e.preventDefault(); canvasFitToView(state); return; }
+    // Phase 3: drawings undo/redo. isTyping() above already guards against
+    // hijacking native text undo while a drawing text/sticky editor
+    // (contentEditable) or any other input has focus — mirrors the reader's guard.
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      if (e.shiftKey) canvasRedo(state); else canvasUndo(state);
+      return;
+    }
+    if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); canvasRedo(state); return; }
+    if (e.key === 'Escape' && state.tool === 'connector' && state.pendingConnectorFrom) {
+      e.preventDefault();
+      canvasConnectorCancel(state);
+      return;
+    }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedId) {
+      e.preventDefault();
+      canvasRequestDeleteItem(state, state.selectedId);
+      return;
+    }
+  };
+  const onKeyUp = (e) => {
+    if (e.code === 'Space') { state.spaceDown = false; scrollEl.classList.remove('canvas-space'); }
+  };
+  document.addEventListener('keydown', onKeyDown);
+  document.addEventListener('keyup', onKeyUp);
+
+  const removeDropUpload = canvasWireDropUpload(state);
+
+  state._cleanup = () => {
+    scrollEl.removeEventListener('pointerdown', onPointerDown);
+    scrollEl.removeEventListener('wheel', onWheel);
+    document.removeEventListener('keydown', onKeyDown);
+    document.removeEventListener('keyup', onKeyUp);
+    removeDropUpload();
+    canvasCloseLightbox();
+  };
+}
+
+/* ---- layout persistence (mirrors readerMarkDirty/readerFlushSave) ---- */
+
+function canvasLayoutDoc(state) {
+  const items = [];
+  state.itemsById.forEach((en) => {
+    // An in-flight/failed upload placeholder has no backing canvas_files row
+    // yet (or ever, if it failed) — never persist it. Once the upload
+    // resolves, canvasRefreshItem() swaps the ref to a real 'canvas-file' id
+    // and the *next* save includes it normally.
+    if (en.data.ref && en.data.ref.type === 'uploading') return;
+    items.push({ id: en.data.id, ref: en.data.ref, x: en.data.x, y: en.data.y, w: en.data.w, h: en.data.h, z: en.data.z });
+  });
+  return { v: 1, view: { tx: state.tx, ty: state.ty, scale: state.scale }, items, drawings: state.drawings || [] };
+}
+
+function markCanvasDirty(state) {
+  state.dirty = true;
+  if (state.saveTimer) clearTimeout(state.saveTimer);
+  state.saveTimer = setTimeout(() => canvasFlushSave(state), 800);
+}
+
+async function canvasFlushSave(state) {
+  if (state.saveTimer) { clearTimeout(state.saveTimer); state.saveTimer = null; }
+  if (!state.dirty) return;
+  state.dirty = false;
+  try {
+    await api.put(`/concepts/${state.conceptId}/canvas`, { data: canvasLayoutDoc(state) });
+  } catch (e) {
+    console.error('Canvas: failed to save layout', e);
+    if (canvasState === state) state.dirty = true; // retry on the next change
+  }
+}
+
+/* ---- building the board: load saved layout, or auto-place item #0 + files ---- */
+
+function canvasBuildItems(state, layout) {
+  const hasSaved = layout && Array.isArray(layout.items) && layout.items.length;
+  if (hasSaved) {
+    layout.items.forEach((it) => canvasMountItem(state, it));
+    return;
+  }
+  // Auto-place: note #0 top-left (only once compiled — CANVAS.md §2), then
+  // every canvas file flowing right in rows. Persisted immediately so the
+  // next open reuses these positions instead of re-auto-placing.
+  let z = 1;
+  const items = [];
+  if (state.note && state.note.status === 'compiled') {
+    items.push({ id: canvasNewItemId(), ref: { type: 'note', id: state.note.id }, x: 40, y: 40, w: 520, h: 700, z: z++ });
+  }
+  const startX = items.length ? 620 : 40;
+  const colW = 360, colH = 480, gap = 40, perRow = 3;
+  state.files.forEach((f, i) => {
+    const col = i % perRow, row = Math.floor(i / perRow);
+    items.push({
+      id: canvasNewItemId(), ref: { type: 'canvas-file', id: f.id },
+      x: startX + col * (colW + gap), y: 40 + row * (colH + gap), w: colW, h: colH, z: z++,
+    });
+  });
+  items.forEach((it) => canvasMountItem(state, it));
+  if (items.length) markCanvasDirty(state);
+}
+
+async function renderCanvasView(courseId, conceptId, origin) {
+  origin = origin === 'schedule' ? 'schedule' : 'course';
+  const view = document.getElementById('view');
+  view.classList.add('view-fullbleed');
+  view.innerHTML = '<div class="canvas-loading">Loading canvas&hellip;</div>';
+
+  let notes = [], concepts = [];
+  try {
+    [notes, concepts] = await Promise.all([
+      api.get(`/courses/${courseId}/notes`),
+      api.get(`/courses/${courseId}/concepts`),
+    ]);
+  } catch (e) {
+    view.innerHTML = `<div class="p-8 text-sm" style="color:var(--danger)">Could not load course: ${esc(e.message)}</div>`;
+    return;
+  }
+
+  if (!concepts.length) {
+    view.innerHTML = `
+      <div class="canvas-empty-shell">
+        <a href="#/course/${courseId}" class="btn btn-ghost">&larr; Back to course</a>
+        <p class="mt-6 text-sm text-muted">No lessons yet — analyze materials on the course page first.</p>
+      </div>`;
+    return;
+  }
+
+  const notesByConceptId = new Map();
+  notes.forEach((n) => { if (n.concept_id != null) notesByConceptId.set(n.concept_id, n); });
+
+  let activeConceptId = conceptId != null && conceptId !== '' ? Number(conceptId) : null;
+  if (activeConceptId == null || !concepts.some((c) => c.id === activeConceptId)) {
+    const withCompiledNote = concepts.find((c) => {
+      const n = notesByConceptId.get(c.id);
+      return n && n.status === 'compiled';
+    });
+    activeConceptId = (withCompiledNote || concepts[0]).id;
+  }
+
+  let canvasData;
+  try {
+    canvasData = await api.get(`/concepts/${activeConceptId}/canvas`);
+  } catch (e) {
+    canvasData = { layout: null, files: [] };
+  }
+
+  const activeNote = notesByConceptId.get(activeConceptId) || null;
+  const activeConcept = concepts.find((c) => c.id === activeConceptId);
+  const files = canvasData.files || [];
+
+  // Schedule origin: the left sidebar lists the upcoming schedule (cross-course).
+  let scheduleItems = [];
+  if (origin === 'schedule') {
+    try {
+      const to = new Date(Date.now() + 120 * 864e5).toISOString().slice(0, 10);
+      scheduleItems = await api.get(`/schedule/upcoming?from=${todayISO()}&to=${to}`);
+    } catch (e) { scheduleItems = []; }
+  }
+
+  view.innerHTML = canvasShellHtml(courseId, activeConceptId, concepts, notesByConceptId, activeConcept, activeNote, files, origin, scheduleItems);
+
+  const state = {
+    courseId: Number(courseId),
+    conceptId: activeConceptId,
+    concept: activeConcept || null,
+    concepts,                 // full lesson list — used by canvasSwitchLesson (in-place switch)
+    notesByConceptId,         // concept_id -> note, for item #0 + the lesson header
+    origin,                   // 'course' | 'schedule' — which list the left sidebar shows
+    scheduleItems,            // schedule-origin sidebar rows (empty in course mode)
+    scrollEl: view.querySelector('#canvas-scroll'),
+    worldEl: view.querySelector('#canvas-world'),
+    note: activeNote,
+    files,
+    filesById: new Map(files.map((f) => [f.id, f])),
+    itemsById: new Map(),
+    selectedId: null,
+    tx: 0, ty: 0, scale: 1,
+    drawings: (canvasData.layout && canvasData.layout.drawings) || [], // Phase 3 owns this
+    // ---- Phase 3: vector drawing layer ----
+    vectorsEl: view.querySelector('#canvas-vectors'),
+    vectorsG: view.querySelector('#canvas-vectors-g'),
+    vectorsDefs: view.querySelector('#canvas-vectors-defs'),
+    vectorNodes: new Map(), // drawing id -> its SVG DOM node, rebuilt by canvasRenderVectors()
+    tool: 'select',
+    color: CANVAS_COLORS[0],
+    strokeWidth: CANVAS_STROKE_WIDTHS[1],
+    pendingConnectorFrom: null, // itemId picked as the connector's first endpoint, or null
+    historyPast: [], // stack of JSON-stringified `drawings` snapshots (undo)
+    historyFuture: [], // stack of JSON-stringified `drawings` snapshots (redo)
+    dirty: false,
+    saveTimer: null,
+    spaceDown: false,
+    fileSearch: '',
+    fileSort: 'newest',
+    _panRaf: null,
+    _cleanup: null,
+  };
+  canvasState = state;
+
+  canvasBuildItems(state, canvasData.layout);
+  canvasRenderVectors(state); // Phase 3: paint any saved drawings/connectors now that itemsById is populated
+  canvasRenderToolbar(state);
+  canvasWireEvents(state);
+  canvasRenderFileList(state);
+
+  // Resume polling any docx/pptx canvas file that was already 'converting'
+  // when this board loaded (e.g. opened in a fresh tab mid-conversion) — the
+  // upload-time poll only covers the tab that started the upload.
+  state.itemsById.forEach((entry, itemId) => {
+    if (entry.refKind === 'canvas-file' && entry.refObj && entry.refObj.status === 'converting') {
+      canvasPollFile(state, entry.refObj.id, itemId);
+    }
+  });
+
+  if (canvasData.layout && canvasData.layout.view) {
+    state.tx = canvasData.layout.view.tx || 0;
+    state.ty = canvasData.layout.view.ty || 0;
+    state.scale = canvasClampScale(canvasData.layout.view.scale || 1);
+    canvasApplyTransform(state);
+  } else {
+    canvasFitToView(state, false); // computed default — not itself a user change worth a write
+  }
+
+  // File-container controls (Phase 2b §1/§2): search/sort re-render just the
+  // row list; Add-file mirrors the drop-upload path but places at the
+  // current viewport center instead of a drop point.
+  const searchInput = view.querySelector('#canvas-file-search');
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      state.fileSearch = searchInput.value;
+      canvasRenderFileList(state);
+    });
+  }
+  const sortSelect = view.querySelector('#canvas-file-sort');
+  if (sortSelect) {
+    sortSelect.value = state.fileSort;
+    sortSelect.addEventListener('change', () => {
+      state.fileSort = sortSelect.value;
+      canvasRenderFileList(state);
+    });
+  }
+  const addFileBtn = view.querySelector('#canvas-add-file-btn');
+  const fileInput = view.querySelector('#canvas-file-input');
+  if (addFileBtn && fileInput) {
+    addFileBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+      canvasHandleFileInputChange(state, fileInput.files);
+      fileInput.value = '';
+    });
+  }
+
+  // Resizable sidebars (round 7 Part 6) — wired once at mount; canvasSwitchLesson
+  // rebuilds only the board contents, never the shell, so these stay attached.
+  view.querySelectorAll('.canvas-sidebar-resizer').forEach((el) => canvasWireSidebarResizer(el));
+
+  // Lesson header (Phase 2b §4): fire the same best-effort quiz prefetch the
+  // old study views used, then refresh just the header so the button label
+  // picks up "Preparing quiz…" if generation just kicked off.
+  if (activeConcept) {
+    maybePrefetchQuiz(activeConcept.id).then(() => {
+      if (canvasState === state) canvasRenderLessonControls(state);
+    });
+  }
+}
+
+// Switch the active lesson WITHOUT rebuilding the shell/sidebars (the old
+// behavior — set location.hash → route() → renderCanvasView — flashed the whole
+// screen). Re-renders only the canvas contents + file panel + lesson header +
+// the active-row highlight, and updates the URL via replaceState so no route()
+// fires. Flushes the current lesson's unsaved drawings first.
+async function canvasSwitchLesson(state, conceptId, courseId) {
+  conceptId = Number(conceptId);
+  courseId = (courseId != null && courseId !== '') ? Number(courseId) : state.courseId;
+  if (!state || canvasState !== state) return;
+  if (conceptId === state.conceptId && courseId === state.courseId) return;
+
+  closeAiConversation(); // round 6: an open conversation card belongs to the lesson we're leaving
+
+  if (state.saveTimer) { clearTimeout(state.saveTimer); state.saveTimer = null; }
+  if (state.dirty) {
+    state.dirty = false;
+    api.put(`/concepts/${state.conceptId}/canvas`, { data: canvasLayoutDoc(state) })
+      .catch((e) => console.error('Canvas: failed to flush layout on lesson switch', e));
+  }
+
+  // Schedule origin can cross courses: refresh this course's concept list + notes
+  // so the lesson header + note item #0 resolve for the target concept.
+  if (courseId !== state.courseId) {
+    try {
+      const [notes, concepts] = await Promise.all([
+        api.get(`/courses/${courseId}/notes`),
+        api.get(`/courses/${courseId}/concepts`),
+      ]);
+      if (canvasState !== state) return;
+      state.courseId = courseId;
+      state.concepts = concepts;
+      state.notesByConceptId = new Map();
+      notes.forEach((n) => { if (n.concept_id != null) state.notesByConceptId.set(n.concept_id, n); });
+    } catch (e) { /* keep old course data on failure */ }
+  }
+  if (!state.concepts.some((c) => c.id === conceptId)) return;
+
+  let data;
+  try { data = await api.get(`/concepts/${conceptId}/canvas`); }
+  catch (e) { data = { layout: null, files: [] }; }
+  if (canvasState !== state) return; // left / switched again mid-fetch
+
+  state.conceptId = conceptId;
+  state.concept = state.concepts.find((c) => c.id === conceptId) || null;
+  state.note = state.notesByConceptId.get(conceptId) || null;
+  state.files = data.files || [];
+  state.filesById = new Map(state.files.map((f) => [f.id, f]));
+  state.drawings = (data.layout && data.layout.drawings) || [];
+  state.selectedId = null;
+  state.pendingConnectorFrom = null;
+  state.historyPast = [];
+  state.historyFuture = [];
+  state.fileSearch = '';
+
+  // Rebuild ONLY the canvas contents — keep #canvas-vectors + the shell + all
+  // the already-wired listeners (canvasWireEvents / search / sort / add-file).
+  state.worldEl.querySelectorAll('.canvas-item').forEach((el) => el.remove());
+  state.itemsById = new Map();
+  canvasBuildItems(state, data.layout);
+  canvasRenderVectors(state);
+  canvasRenderFileList(state);
+  canvasRenderLessonControls(state);
+
+  document.querySelectorAll('.canvas-lesson-row').forEach((el) => {
+    el.classList.toggle('active', Number(el.dataset.conceptId) === conceptId);
+  });
+  const titleEl = document.querySelector('.canvas-topbar-title');
+  if (titleEl) titleEl.textContent = state.concept ? state.concept.name : 'Lesson';
+  const searchInput = document.getElementById('canvas-file-search');
+  if (searchInput) searchInput.value = '';
+
+  if (data.layout && data.layout.view) {
+    state.tx = data.layout.view.tx || 0;
+    state.ty = data.layout.view.ty || 0;
+    state.scale = canvasClampScale(data.layout.view.scale || 1);
+    canvasApplyTransform(state);
+  } else {
+    canvasFitToView(state, false);
+  }
+
+  state.itemsById.forEach((entry, itemId) => {
+    if (entry.refKind === 'canvas-file' && entry.refObj && entry.refObj.status === 'converting') {
+      canvasPollFile(state, entry.refObj.id, itemId);
+    }
+  });
+
+  if (state.concept) {
+    maybePrefetchQuiz(state.concept.id).then(() => {
+      if (canvasState === state) canvasRenderLessonControls(state);
+    });
+  }
+
+  const q = state.origin === 'schedule' ? '?from=schedule' : '';
+  try { history.replaceState(null, '', `#/course/${state.courseId}/canvas/${conceptId}${q}`); } catch (e) { /* ignore */ }
+}
+
+function stopCanvas() {
+  closeAiConversation(); // round 6: never leave the conversation overlay orphaned across a route change
+  const view = document.getElementById('view');
+  if (!canvasState) {
+    if (view) view.classList.remove('view-fullbleed');
+    return;
+  }
+  const state = canvasState;
+  canvasState = null;
+  if (state._panRaf) { cancelAnimationFrame(state._panRaf); state._panRaf = null; }
+  if (state.saveTimer) { clearTimeout(state.saveTimer); state.saveTimer = null; }
+  if (state.dirty) {
+    state.dirty = false;
+    api.put(`/concepts/${state.conceptId}/canvas`, { data: canvasLayoutDoc(state) }).catch((e) => {
+      console.error('Canvas: failed to flush layout on close', e);
+    });
+  }
+  if (state._cleanup) state._cleanup();
+  if (view) view.classList.remove('view-fullbleed');
+}
+
+/* ---------- infinite canvas: whiteboard vector layer (Build 9 Phase 3) ----------
+   Spec: frontend/CANVAS.md §4.3 (drawings[] shapes), §9 (tool set), §10
+   (layering). Conceptually the reader annotation engine (app.js ~1608+):
+   one flat insertion-ordered array (`state.drawings`), repaint-from-model,
+   pop-based undo (here a full snapshot stack instead, per the task spec),
+   a contentEditable inline text editor, and a debounced save via the
+   existing markCanvasDirty()/canvasFlushSave() (unchanged — canvasLayoutDoc
+   already serializes `state.drawings` verbatim). Adapted: world coords (not
+   page fractions) and SVG DOM nodes (not a 2-D canvas), so shapes/text/
+   connectors are individually addressable and connectors can re-route when
+   an item moves.
+
+   #canvas-vectors is a 0×0, `overflow:visible` <svg> positioned at inset:0
+   inside #canvas-world — its own local coordinate system (no viewBox) is
+   1 unit = 1 CSS px anchored at world (0,0), exactly matching the raw
+   world-space left/top every .canvas-item already uses, so every drawing's
+   stored x/y/points/etc. map directly onto SVG attributes with no extra math.
+   Because the <svg> element's own box is 0×0, it never blocks pointer events
+   on items or the canvas surface just by being stacked above them (nothing
+   there to hit-test) — real interaction for every tool is driven off
+   pointer listeners on state.scrollEl (a normal, fully-sized element, same
+   as the existing pan/item-drag code) using canvasScreenToWorld() to convert
+   screen points, with eraser hit-testing done against the `drawings` model
+   (canvasHitTestDrawing) rather than DOM pointer targeting. The exception is
+   committed text/sticky notes, which render into a <foreignObject> — real
+   embedded HTML with its own genuine box — so double-click-to-edit works
+   regardless of the SVG's own pointer-events state. */
+
+function canvasNewDrawingId() { return 'dr_' + Math.random().toString(36).slice(2, 10); }
+
+function canvasSvgEl(tag, attrs) {
+  const el = document.createElementNS(CANVAS_SVG_NS, tag);
+  if (attrs) Object.keys(attrs).forEach((k) => el.setAttribute(k, attrs[k]));
+  return el;
+}
+
+/* ---- toolbar: tool/color/stroke selection + undo/redo (mirrors the
+   reader's readerToolbarHtml/readerSetTool/readerSetColor) ---- */
+
+function canvasToolIcon(tool) {
+  const paths = {
+    select: '<path d="M5 3l6 16 2-7 7-2-15-7z"/>',
+    pen: '<path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>',
+    text: '<path d="M5 6h14"/><path d="M12 6v14"/><path d="M9 20h6"/>',
+    sticky: '<path d="M4 4h13l3 3v13H4z"/><path d="M17 4v4h4"/>',
+    rect: '<rect x="4" y="5" width="16" height="14" rx="1.5"/>',
+    ellipse: '<ellipse cx="12" cy="12" rx="8" ry="6"/>',
+    line: '<path d="M5 19L19 5"/>',
+    arrow: '<path d="M5 19L19 5"/><path d="M19 5h-6"/><path d="M19 5v6"/>',
+    connector: '<circle cx="6" cy="7" r="2"/><circle cx="18" cy="17" r="2"/><path d="M8 8l8 8"/>',
+    eraser: '<path d="M18 13l-7 7H7l-4-4a2 2 0 0 1 0-2.8L13 3l7 7-2 3z"/><path d="M9.5 7.5l7 7"/>',
+  };
+  return paths[tool] || '';
+}
+
+function canvasToolTitle(tool) {
+  const titles = {
+    select: 'Select / pan',
+    pen: 'Pen',
+    text: 'Text note',
+    sticky: 'Sticky note',
+    rect: 'Rectangle',
+    ellipse: 'Ellipse',
+    line: 'Line',
+    arrow: 'Arrow',
+    connector: 'Connector (click two items)',
+    eraser: 'Eraser',
+  };
+  return titles[tool] || tool;
+}
+
+function canvasToolbarHtml(state) {
+  const toolBtns = CANVAS_TOOLS.map((tool) => `
+    <button data-action="canvas-tool" data-tool="${tool}" title="${esc(canvasToolTitle(tool))}"
+      class="canvas-tool-btn${state.tool === tool ? ' canvas-tool-btn-active' : ''}">
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${canvasToolIcon(tool)}</svg>
+    </button>`).join('');
+  const swatches = CANVAS_COLORS.map((c) => `
+    <button data-action="canvas-color" data-color="${c}" title="Color"
+      class="canvas-swatch${state.color === c ? ' canvas-swatch-active' : ''}" style="background:${c}"></button>`).join('');
+  const strokeBtns = CANVAS_STROKE_WIDTHS.map((w) => `
+    <button data-action="canvas-stroke" data-width="${w}" title="Stroke width"
+      class="canvas-stroke-btn${state.strokeWidth === w ? ' canvas-stroke-btn-active' : ''}">
+      <span class="canvas-stroke-dot" style="width:${Math.min(14, w + 4)}px;height:${Math.min(14, w + 4)}px"></span>
+    </button>`).join('');
+  return `
+    <div class="canvas-toolbar" id="canvas-toolbar">
+      <div class="canvas-toolbar-group">${toolBtns}</div>
+      <span class="canvas-toolbar-sep"></span>
+      <div class="canvas-toolbar-group">${swatches}</div>
+      <span class="canvas-toolbar-sep"></span>
+      <div class="canvas-toolbar-group">${strokeBtns}</div>
+      <span class="canvas-toolbar-sep"></span>
+      <div class="canvas-toolbar-group">
+        <button data-action="canvas-undo" title="Undo (Ctrl/Cmd+Z)" class="canvas-tool-btn"${state.historyPast.length ? '' : ' disabled'}>
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-2"/></svg>
+        </button>
+        <button data-action="canvas-redo" title="Redo (Ctrl/Cmd+Shift+Z)" class="canvas-tool-btn"${state.historyFuture.length ? '' : ' disabled'}>
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h2"/></svg>
+        </button>
+      </div>
+    </div>`;
+}
+
+function canvasRenderToolbar(state) {
+  const host = document.getElementById('canvas-toolbar-host');
+  if (host) host.innerHTML = canvasToolbarHtml(state);
+}
+
+function canvasSetTool(state, tool) {
+  if (!state || !CANVAS_TOOLS.includes(tool) || state.tool === tool) return;
+  if (state.tool === 'connector' && state.pendingConnectorFrom) canvasConnectorCancel(state);
+  state.tool = tool;
+  const shell = state.scrollEl && state.scrollEl.closest('.canvas-shell');
+  if (shell) {
+    CANVAS_TOOLS.forEach((t) => shell.classList.remove('canvas-tool-' + t));
+    shell.classList.add('canvas-tool-' + tool);
+  }
+  canvasRenderToolbar(state);
+}
+
+function canvasSetColor(state, color) {
+  if (!state) return;
+  state.color = color;
+  canvasRenderToolbar(state);
+}
+
+function canvasSetStroke(state, width) {
+  if (!state) return;
+  state.strokeWidth = Number(width);
+  canvasRenderToolbar(state);
+}
+
+/* ---- history: snapshot-the-whole-array undo/redo (§9 "Undo/redo: array
+   history") — simpler and more robust than per-field undo, and the model is
+   small enough per lesson for this to stay cheap. ---- */
+
+function canvasSnapshotHistory(state) {
+  state.historyPast.push(JSON.stringify(state.drawings));
+  if (state.historyPast.length > CANVAS_HISTORY_CAP) state.historyPast.shift();
+  state.historyFuture = [];
+}
+
+function canvasUndo(state) {
+  if (!state || !state.historyPast.length) return;
+  state.historyFuture.push(JSON.stringify(state.drawings));
+  state.drawings = JSON.parse(state.historyPast.pop());
+  canvasRenderVectors(state);
+  canvasRenderToolbar(state);
+  markCanvasDirty(state);
+}
+
+function canvasRedo(state) {
+  if (!state || !state.historyFuture.length) return;
+  state.historyPast.push(JSON.stringify(state.drawings));
+  state.drawings = JSON.parse(state.historyFuture.pop());
+  canvasRenderVectors(state);
+  canvasRenderToolbar(state);
+  markCanvasDirty(state);
+}
+
+/* ---- connector anchoring: nearest-side/center intersection between two
+   item rects, recomputed every repaint so a connector always follows its
+   items (CANVAS.md §4.3). ---- */
+
+function canvasDrawingItemRect(state, itemId) {
+  const entry = state.itemsById.get(itemId);
+  if (!entry) return null;
+  return { x: entry.data.x, y: entry.data.y, w: entry.data.w, h: entry.data.h };
+}
+
+function canvasRectBoundaryPoint(rect, towardX, towardY) {
+  const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
+  const dx = towardX - cx, dy = towardY - cy;
+  if (dx === 0 && dy === 0) return { x: cx, y: cy };
+  const halfW = Math.max(1, rect.w / 2), halfH = Math.max(1, rect.h / 2);
+  const scaleX = dx !== 0 ? halfW / Math.abs(dx) : Infinity;
+  const scaleY = dy !== 0 ? halfH / Math.abs(dy) : Infinity;
+  const scale = Math.min(scaleX, scaleY);
+  return { x: cx + dx * scale, y: cy + dy * scale };
+}
+
+// Returns [pointOnA, pointOnB] where each item's boundary is crossed by the
+// line between the two rects' centers — a simple, correct "nearest side"
+// anchor that re-derives itself from each item's CURRENT rect every call.
+function canvasConnectorAnchorPoints(rectA, rectB) {
+  const centerA = { x: rectA.x + rectA.w / 2, y: rectA.y + rectA.h / 2 };
+  const centerB = { x: rectB.x + rectB.w / 2, y: rectB.y + rectB.h / 2 };
+  return [
+    canvasRectBoundaryPoint(rectA, centerB.x, centerB.y),
+    canvasRectBoundaryPoint(rectB, centerA.x, centerA.y),
+  ];
+}
+
+function canvasConnectorPoints(state, drawing) {
+  const a = canvasDrawingItemRect(state, drawing.from);
+  const b = canvasDrawingItemRect(state, drawing.to);
+  if (!a || !b) return null; // an endpoint item no longer exists — skip rendering (defensive; should be dropped already)
+  return canvasConnectorAnchorPoints(a, b);
+}
+
+// Cheap per-frame update during an item drag/resize: just moves the existing
+// connector <line> DOM nodes' endpoints, no full rebuild — canvasRenderVectors
+// still runs once on drag-end via the item's own markCanvasDirty path... no,
+// markCanvasDirty only persists; the full repaint already happened at
+// mount/mutation time and connectors don't themselves change, so this alone
+// keeps them visually correct through the whole drag with no extra rebuild.
+function canvasUpdateConnectors(state) {
+  if (!state.vectorNodes || !state.vectorNodes.size) return;
+  state.drawings.forEach((d) => {
+    if (d.type !== 'connector') return;
+    const el = state.vectorNodes.get(d.id);
+    if (!el) return;
+    const pts = canvasConnectorPoints(state, d);
+    if (!pts) return;
+    el.setAttribute('x1', pts[0].x); el.setAttribute('y1', pts[0].y);
+    el.setAttribute('x2', pts[1].x); el.setAttribute('y2', pts[1].y);
+  });
+}
+
+// Drops every connector referencing `itemId` (an item that just stopped
+// existing on the board) — CANVAS.md §4.3. Returns true if anything changed.
+function canvasDropConnectorsForItem(state, itemId) {
+  const before = state.drawings.length;
+  state.drawings = state.drawings.filter((d) => !(d.type === 'connector' && (d.from === itemId || d.to === itemId)));
+  if (state.drawings.length === before) return false;
+  canvasRenderVectors(state);
+  return true;
+}
+
+/* ---- connector two-click pick flow ---- */
+
+function canvasConnectorClearPendingVisual(state) {
+  if (!state.pendingConnectorFrom) return;
+  const entry = state.itemsById.get(state.pendingConnectorFrom);
+  if (entry) entry.el.classList.remove('canvas-connector-pending');
+}
+
+function canvasConnectorCancel(state) {
+  canvasConnectorClearPendingVisual(state);
+  state.pendingConnectorFrom = null;
+}
+
+function canvasConnectorPick(state, itemId) {
+  if (!state.pendingConnectorFrom) {
+    state.pendingConnectorFrom = itemId;
+    const entry = state.itemsById.get(itemId);
+    if (entry) entry.el.classList.add('canvas-connector-pending');
+    return;
+  }
+  if (state.pendingConnectorFrom === itemId) { canvasConnectorCancel(state); return; } // re-click same item cancels
+  const from = state.pendingConnectorFrom;
+  canvasConnectorClearPendingVisual(state);
+  state.pendingConnectorFrom = null;
+  canvasSnapshotHistory(state);
+  state.drawings.push({ id: canvasNewDrawingId(), type: 'connector', color: CANVAS_CONNECTOR_COLOR, stroke: state.strokeWidth, from, to: itemId });
+  canvasRenderVectors(state);
+  markCanvasDirty(state);
+}
+
+/* ---- arrowhead markers: one <marker> per distinct color, created lazily
+   into #canvas-vectors-defs and reused (SVG markers can't just take
+   currentColor reliably across browsers, so a tiny per-color marker is the
+   simplest portable approach). ---- */
+
+function canvasArrowMarkerId(state, color) {
+  const id = 'canvas-arrowhead-' + color.replace(/[^a-zA-Z0-9]/g, '');
+  if (state.vectorsDefs && !state.vectorsDefs.querySelector('#' + id)) {
+    const marker = canvasSvgEl('marker', {
+      id, viewBox: '0 0 10 10', refX: '8', refY: '5',
+      markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse',
+    });
+    marker.appendChild(canvasSvgEl('path', { d: 'M0,0 L10,5 L0,10 z', fill: color }));
+    state.vectorsDefs.appendChild(marker);
+  }
+  return id;
+}
+
+/* ---- building + repainting SVG nodes from the model (repaint-from-model,
+   like the reader's redrawPage) ---- */
+
+function canvasBuildDrawingEl(state, d, isPreview) {
+  const strokeW = d.stroke || 2;
+  let el = null;
+  if (d.type === 'pen') {
+    const pts = (d.points || []).map((p) => `${p.x},${p.y}`).join(' ');
+    if (!pts) return null;
+    el = canvasSvgEl('polyline', { points: pts, fill: 'none', stroke: d.color, 'stroke-width': strokeW, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
+  } else if (d.type === 'rect') {
+    el = canvasSvgEl('rect', { x: d.x, y: d.y, width: Math.max(0, d.w), height: Math.max(0, d.h), fill: (d.fill && d.fill !== 'none') ? d.fill : 'none', stroke: d.color, 'stroke-width': strokeW });
+  } else if (d.type === 'ellipse') {
+    el = canvasSvgEl('ellipse', { cx: d.x + d.w / 2, cy: d.y + d.h / 2, rx: Math.max(0, d.w / 2), ry: Math.max(0, d.h / 2), fill: (d.fill && d.fill !== 'none') ? d.fill : 'none', stroke: d.color, 'stroke-width': strokeW });
+  } else if (d.type === 'line') {
+    el = canvasSvgEl('line', { x1: d.x1, y1: d.y1, x2: d.x2, y2: d.y2, stroke: d.color, 'stroke-width': strokeW, 'stroke-linecap': 'round' });
+  } else if (d.type === 'arrow') {
+    el = canvasSvgEl('line', { x1: d.x1, y1: d.y1, x2: d.x2, y2: d.y2, stroke: d.color, 'stroke-width': strokeW, 'stroke-linecap': 'round', 'marker-end': `url(#${canvasArrowMarkerId(state, d.color)})` });
+  } else if (d.type === 'connector') {
+    const pts = canvasConnectorPoints(state, d);
+    if (!pts) return null;
+    // Round 9: always neon purple (+ a glow via the .canvas-connector-line class),
+    // regardless of the color stored on the drawing — distinct from the arrow tool.
+    el = canvasSvgEl('line', { x1: pts[0].x, y1: pts[0].y, x2: pts[1].x, y2: pts[1].y, stroke: CANVAS_CONNECTOR_COLOR, 'stroke-width': strokeW, 'stroke-linecap': 'round', 'marker-end': `url(#${canvasArrowMarkerId(state, CANVAS_CONNECTOR_COLOR)})` });
+    el.setAttribute('class', 'canvas-connector-line');
+  } else if (d.type === 'text') {
+    const w = Math.max(40, (d.text || '').length * (d.size || CANVAS_TEXT_SIZE) * 0.62 + 16);
+    const h = (d.size || CANVAS_TEXT_SIZE) * 1.6 + 8;
+    const fo = canvasSvgEl('foreignObject', { x: d.x, y: d.y, width: w, height: h });
+    const div = document.createElementNS(CANVAS_XHTML_NS, 'div');
+    div.className = 'canvas-drawing-text';
+    div.style.color = d.color;
+    div.style.fontSize = (d.size || CANVAS_TEXT_SIZE) + 'px';
+    div.style.fontWeight = d.bold ? '700' : '400'; // round 8 item 6: whole-note formatting
+    div.style.fontStyle = d.italic ? 'italic' : 'normal';
+    div.textContent = d.text || '';
+    if (!isPreview) div.addEventListener('dblclick', (e) => { e.stopPropagation(); canvasEditDrawingText(state, d); });
+    fo.appendChild(div);
+    el = fo;
+  } else if (d.type === 'sticky') {
+    const g = canvasSvgEl('g', {});
+    g.appendChild(canvasSvgEl('rect', { x: d.x, y: d.y, width: Math.max(1, d.w), height: Math.max(1, d.h), fill: d.color, stroke: 'rgba(0,0,0,.12)', 'stroke-width': 1, rx: 6 }));
+    const fo = canvasSvgEl('foreignObject', { x: d.x + 8, y: d.y + 8, width: Math.max(1, d.w - 16), height: Math.max(1, d.h - 16) });
+    const div = document.createElementNS(CANVAS_XHTML_NS, 'div');
+    div.className = 'canvas-sticky-text';
+    // Round 8 item 6: a sticky's font-size/bold/italic are now part of the
+    // model too (previously the fixed 0.8rem from .canvas-sticky-text with no
+    // way to change it) — 15 matches the size canvasEditDrawingText already
+    // used as the sticky editor's default.
+    div.style.fontSize = (d.size || 15) + 'px';
+    div.style.fontWeight = d.bold ? '700' : '400';
+    div.style.fontStyle = d.italic ? 'italic' : 'normal';
+    div.textContent = d.text || '';
+    if (!isPreview) div.addEventListener('dblclick', (e) => { e.stopPropagation(); canvasEditDrawingText(state, d); });
+    fo.appendChild(div);
+    g.appendChild(fo);
+    if (!isPreview) {
+      // A small bottom-right handle to signal the sticky is resizable (drag it —
+      // or anywhere near the corner — to resize; the drag itself is handled by
+      // canvasStartDrawingManipulate via world hit-testing, not this element).
+      const hs = 12;
+      g.appendChild(canvasSvgEl('rect', {
+        x: d.x + Math.max(1, d.w) - hs, y: d.y + Math.max(1, d.h) - hs,
+        width: hs, height: hs, fill: 'rgba(0,0,0,.28)', rx: 2,
+      }));
+    }
+    el = g;
+  }
+  if (el) {
+    if (d.id) el.dataset.drawingId = d.id;
+    if (isPreview) el.setAttribute('opacity', '0.65');
+  }
+  return el;
+}
+
+// Full repaint from `state.drawings` (+ an optional in-progress, uncommitted
+// `preview` drawing on top for live feedback while dragging). Rebuilds
+// state.vectorNodes so canvasUpdateConnectors() has fresh DOM refs.
+function canvasRenderVectors(state, preview) {
+  const g = state.vectorsG;
+  if (!g) return;
+  g.innerHTML = '';
+  const nodes = new Map();
+  (state.drawings || []).forEach((d) => {
+    const el = canvasBuildDrawingEl(state, d, false);
+    if (!el) return;
+    g.appendChild(el);
+    if (d.id) nodes.set(d.id, el);
+  });
+  if (preview) {
+    const el = canvasBuildDrawingEl(state, preview, true);
+    if (el) g.appendChild(el);
+  }
+  state.vectorNodes = nodes;
+}
+
+/* ---- eraser: model-based hit-testing (mirrors the reader's readerHitTest/
+   readerEraseAt) — "topmost" = last-inserted matching entry, since later
+   drawings paint over earlier ones. ---- */
+
+function canvasPtNearSegment(pt, a, b, tol) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  let t = lenSq ? ((pt.x - a.x) * dx + (pt.y - a.y) * dy) / lenSq : 0;
+  t = Math.max(0, Math.min(1, t));
+  const px = a.x + t * dx, py = a.y + t * dy;
+  return Math.hypot(pt.x - px, pt.y - py) <= tol;
+}
+
+function canvasDrawingBounds(d) {
+  if (d.type === 'rect' || d.type === 'ellipse' || d.type === 'sticky') return { x: d.x, y: d.y, w: d.w, h: d.h };
+  if (d.type === 'text') return { x: d.x, y: d.y, w: Math.max(40, (d.text || '').length * (d.size || CANVAS_TEXT_SIZE) * 0.62 + 16), h: (d.size || CANVAS_TEXT_SIZE) * 1.6 + 8 };
+  if (d.type === 'pen') {
+    if (!d.points || !d.points.length) return null;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    d.points.forEach((p) => { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
+    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+  }
+  if (d.type === 'line' || d.type === 'arrow') return { x: Math.min(d.x1, d.x2), y: Math.min(d.y1, d.y2), w: Math.abs(d.x2 - d.x1), h: Math.abs(d.y2 - d.y1) };
+  return null;
+}
+
+function canvasHitTestDrawing(state, d, pt, tol) {
+  if (d.type === 'pen') {
+    const pts = d.points || [];
+    for (let i = 1; i < pts.length; i++) if (canvasPtNearSegment(pt, pts[i - 1], pts[i], Math.max(tol, d.stroke || 2))) return true;
+    return false;
+  }
+  if (d.type === 'line' || d.type === 'arrow') {
+    return canvasPtNearSegment(pt, { x: d.x1, y: d.y1 }, { x: d.x2, y: d.y2 }, Math.max(tol, d.stroke || 2));
+  }
+  if (d.type === 'connector') {
+    const pts = canvasConnectorPoints(state, d);
+    if (!pts) return false;
+    return canvasPtNearSegment(pt, pts[0], pts[1], Math.max(tol, d.stroke || 2));
+  }
+  if (d.type === 'rect') {
+    const nearLeft = Math.abs(pt.x - d.x) <= tol && pt.y >= d.y - tol && pt.y <= d.y + d.h + tol;
+    const nearRight = Math.abs(pt.x - (d.x + d.w)) <= tol && pt.y >= d.y - tol && pt.y <= d.y + d.h + tol;
+    const nearTop = Math.abs(pt.y - d.y) <= tol && pt.x >= d.x - tol && pt.x <= d.x + d.w + tol;
+    const nearBottom = Math.abs(pt.y - (d.y + d.h)) <= tol && pt.x >= d.x - tol && pt.x <= d.x + d.w + tol;
+    return nearLeft || nearRight || nearTop || nearBottom;
+  }
+  if (d.type === 'ellipse') {
+    const cx = d.x + d.w / 2, cy = d.y + d.h / 2, rx = Math.max(1, d.w / 2), ry = Math.max(1, d.h / 2);
+    const nx = (pt.x - cx) / rx, ny = (pt.y - cy) / ry;
+    const dist = Math.sqrt(nx * nx + ny * ny);
+    return Math.abs(dist - 1) <= (tol / Math.min(rx, ry));
+  }
+  if (d.type === 'sticky') {
+    return pt.x >= d.x - tol && pt.x <= d.x + d.w + tol && pt.y >= d.y - tol && pt.y <= d.y + d.h + tol;
+  }
+  if (d.type === 'text') {
+    const b = canvasDrawingBounds(d);
+    if (!b) return false;
+    return pt.x >= b.x - tol && pt.x <= b.x + b.w + tol && pt.y >= b.y - tol && pt.y <= b.y + b.h + tol;
+  }
+  return false;
+}
+
+const CANVAS_ERASER_TOL = 8; // world px hit tolerance
+
+function canvasEraseAt(state, pt) {
+  let hitIdx = -1;
+  state.drawings.forEach((d, i) => { if (canvasHitTestDrawing(state, d, pt, CANVAS_ERASER_TOL)) hitIdx = i; }); // keep last match = topmost
+  if (hitIdx === -1) return false;
+  canvasSnapshotHistory(state);
+  state.drawings.splice(hitIdx, 1);
+  canvasRenderVectors(state);
+  canvasRenderToolbar(state);
+  markCanvasDirty(state);
+  return true;
+}
+
+function canvasEraserPointerDown(state, e) {
+  const rect = state.scrollEl.getBoundingClientRect();
+  const hit = (ev) => canvasEraseAt(state, canvasScreenToWorld(state, ev.clientX - rect.left, ev.clientY - rect.top));
+  hit(e);
+  const onMove = (ev) => { if (canvasState === state) hit(ev); };
+  const onUp = () => {
+    state.scrollEl.removeEventListener('pointermove', onMove);
+    state.scrollEl.removeEventListener('pointerup', onUp);
+    state.scrollEl.removeEventListener('pointercancel', onUp);
+  };
+  state.scrollEl.addEventListener('pointermove', onMove);
+  state.scrollEl.addEventListener('pointerup', onUp);
+  state.scrollEl.addEventListener('pointercancel', onUp);
+}
+
+/* ---- whole-note text formatting toolbar (round 8 item 6) ----
+   A tiny floating bar shown ONLY while canvasOpenDrawingEditor's world-space
+   text editor is open — a font-size stepper + Bold/Italic toggles. Mounted
+   to document.body in SCREEN coordinates (not into #canvas-world), so it
+   doesn't pan/zoom away with the editor while writing; repositioned against
+   the editor's live bounding box (its size can change as the font size
+   changes). The `fmt` object is mutated in place and read back by the
+   caller's onCommit, so no separate onChange plumbing is needed. ---- */
+const CANVAS_TEXT_FORMAT_SIZE_MIN = 12;
+const CANVAS_TEXT_FORMAT_SIZE_MAX = 48;
+const CANVAS_TEXT_FORMAT_SIZE_STEP = 2;
+
+function canvasTextFormatToolbarHtml(fmt) {
+  return `
+    <button type="button" class="canvas-fmt-btn" data-fmt="size-dec" title="Smaller">&minus;</button>
+    <span class="canvas-fmt-size" data-fmt-size>${fmt.size}</span>
+    <button type="button" class="canvas-fmt-btn" data-fmt="size-inc" title="Larger">+</button>
+    <span class="canvas-fmt-sep"></span>
+    <button type="button" class="canvas-fmt-btn canvas-fmt-toggle${fmt.bold ? ' active' : ''}" data-fmt="bold" title="Bold"><b>B</b></button>
+    <button type="button" class="canvas-fmt-btn canvas-fmt-toggle${fmt.italic ? ' active' : ''}" data-fmt="italic" title="Italic"><i>I</i></button>`;
+}
+
+// Mounts the toolbar just above `editor` (flips below if there's no room),
+// wires its controls to mutate `fmt` and restyle `editor` LIVE, and returns a
+// teardown function the caller runs when the edit session ends (commit or
+// cancel) either way.
+function canvasMountTextFormatToolbar(editor, fmt) {
+  const bar = document.createElement('div');
+  bar.className = 'canvas-fmt-toolbar';
+  bar.innerHTML = canvasTextFormatToolbarHtml(fmt);
+  document.body.appendChild(bar);
+
+  const position = () => {
+    const r = editor.getBoundingClientRect();
+    const bw = bar.offsetWidth, bh = bar.offsetHeight;
+    let top = r.top - bh - 8;
+    if (top < 4) top = r.bottom + 8; // flip below if there's no room above
+    const left = Math.max(4, Math.min(r.left, window.innerWidth - bw - 4));
+    bar.style.left = left + 'px';
+    bar.style.top = top + 'px';
+  };
+  requestAnimationFrame(position);
+
+  const applyLive = () => {
+    editor.style.fontSize = fmt.size + 'px';
+    editor.style.fontWeight = fmt.bold ? '700' : '400';
+    editor.style.fontStyle = fmt.italic ? 'italic' : 'normal';
+    const sizeEl = bar.querySelector('[data-fmt-size]');
+    if (sizeEl) sizeEl.textContent = fmt.size;
+    const boldBtn = bar.querySelector('[data-fmt="bold"]');
+    if (boldBtn) boldBtn.classList.toggle('active', fmt.bold);
+    const italicBtn = bar.querySelector('[data-fmt="italic"]');
+    if (italicBtn) italicBtn.classList.toggle('active', fmt.italic);
+    requestAnimationFrame(position); // the editor's box can resize with the font
+  };
+
+  // Prevent the editor from losing focus (which commits/ends the edit) when
+  // clicking a toolbar control — same trick as a toolbar next to any
+  // contentEditable: preventDefault on mousedown stops the browser from
+  // moving focus at all, so no blur ever fires on the editor.
+  bar.addEventListener('mousedown', (e) => e.preventDefault());
+  bar.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-fmt]');
+    if (!btn) return;
+    const action = btn.dataset.fmt;
+    if (action === 'size-inc') fmt.size = Math.min(CANVAS_TEXT_FORMAT_SIZE_MAX, fmt.size + CANVAS_TEXT_FORMAT_SIZE_STEP);
+    else if (action === 'size-dec') fmt.size = Math.max(CANVAS_TEXT_FORMAT_SIZE_MIN, fmt.size - CANVAS_TEXT_FORMAT_SIZE_STEP);
+    else if (action === 'bold') fmt.bold = !fmt.bold;
+    else if (action === 'italic') fmt.italic = !fmt.italic;
+    applyLive();
+  });
+
+  return () => bar.remove();
+}
+
+/* ---- inline text editor: a contentEditable div in WORLD coords, appended
+   directly into #canvas-world so it pans/zooms with everything else (mirrors
+   the reader's readerPlaceTextBox — commit on blur/Enter, Esc cancels and
+   must not bubble to any close handler). Used for both the text tool (fresh
+   note) and re-editing an existing text/sticky note (double-click). Round 8
+   item 6: also mounts the whole-note format toolbar above it and passes the
+   live-edited {size,bold,italic} back to onCommit as a second argument. ---- */
+
+function canvasOpenDrawingEditor(state, opts, onCommit) {
+  // Round 9: never open a second editor — the scroll-surface re-edit path and the
+  // foreignObject dblclick fallback can both fire for a single double-click.
+  if (state.worldEl && state.worldEl.querySelector('.canvas-text-editor')) return null;
+  const editor = document.createElement('div');
+  editor.className = 'canvas-text-editor';
+  editor.contentEditable = 'true';
+  editor.style.left = opts.x + 'px';
+  editor.style.top = opts.y + 'px';
+  editor.style.color = opts.color;
+  const fmt = { size: opts.size || CANVAS_TEXT_SIZE, bold: !!opts.bold, italic: !!opts.italic };
+  editor.style.fontSize = fmt.size + 'px';
+  editor.style.fontWeight = fmt.bold ? '700' : '400';
+  editor.style.fontStyle = fmt.italic ? 'italic' : 'normal';
+  // A sticky note wraps text INSIDE its box: fix the editor width to the box so
+  // it wraps like the committed note (the free text tool leaves this unset and
+  // grows via max-content instead).
+  if (opts.wrapWidth) {
+    editor.style.width = opts.wrapWidth + 'px';
+    editor.style.maxWidth = 'none';
+    editor.style.whiteSpace = 'pre-wrap';
+    editor.style.wordBreak = 'break-word';
+  }
+  if (opts.text) editor.textContent = opts.text;
+  state.worldEl.appendChild(editor);
+  editor.focus();
+  if (opts.text) {
+    try {
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      range.collapse(false);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch (err) { /* ignore */ }
+  }
+
+  const destroyToolbar = canvasMountTextFormatToolbar(editor, fmt);
+
+  let settled = false;
+  const commit = () => {
+    if (settled) return;
+    settled = true;
+    destroyToolbar();
+    const text = editor.textContent.trim();
+    editor.remove();
+    onCommit(text, fmt);
+  };
+  editor.addEventListener('blur', commit);
+  editor.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); editor.blur(); }
+    else if (e.key === 'Escape') { e.preventDefault(); settled = true; destroyToolbar(); editor.remove(); }
+    e.stopPropagation(); // don't let Escape/Enter bubble to the canvas's own key handler
+  });
+  return editor;
+}
+
+function canvasPlaceTextNote(state, pt) {
+  canvasSetTool(state, 'select'); // so a click-away commits instead of dropping another text box
+  canvasOpenDrawingEditor(state, { x: pt.x, y: pt.y, color: state.color, size: CANVAS_TEXT_SIZE }, (text, fmt) => {
+    if (!text) { canvasRenderVectors(state); return; }
+    canvasSnapshotHistory(state);
+    state.drawings.push({ id: canvasNewDrawingId(), type: 'text', color: state.color, x: pt.x, y: pt.y, size: fmt.size, bold: fmt.bold, italic: fmt.italic, text });
+    canvasRenderVectors(state);
+    canvasRenderToolbar(state);
+    markCanvasDirty(state);
+  });
+}
+
+// Re-edit an existing text/sticky note's text (double-click on its rendered
+// foreignObject content). An emptied text note is dropped entirely; an
+// emptied sticky just keeps its (now-empty) box, matching the data model.
+// Round 8 item 6: also preloads the note's saved size/bold/italic into the
+// editor + format toolbar, and persists any format-only change (even with
+// the text left untouched).
+function canvasEditDrawingText(state, d) {
+  if (canvasState !== state) return;
+  const before = d.text || '';
+  const beforeFmt = { size: d.size || (d.type === 'sticky' ? 15 : CANVAS_TEXT_SIZE), bold: !!d.bold, italic: !!d.italic };
+  canvasOpenDrawingEditor(state, {
+    x: d.type === 'sticky' ? d.x + 8 : d.x,
+    y: d.type === 'sticky' ? d.y + 8 : d.y,
+    color: d.type === 'sticky' ? 'var(--text)' : d.color,
+    size: beforeFmt.size,
+    bold: beforeFmt.bold,
+    italic: beforeFmt.italic,
+    text: before,
+    wrapWidth: d.type === 'sticky' ? Math.max(40, (d.w || 180) - 16) : undefined,
+  }, (text, fmt) => {
+    const changed = text !== before || fmt.size !== beforeFmt.size || !!fmt.bold !== beforeFmt.bold || !!fmt.italic !== beforeFmt.italic;
+    if (!changed) { canvasRenderVectors(state); return; }
+    if (d.type === 'text' && !text) {
+      const idx = state.drawings.indexOf(d);
+      if (idx !== -1) {
+        canvasSnapshotHistory(state);
+        state.drawings.splice(idx, 1);
+        canvasRenderVectors(state);
+        canvasRenderToolbar(state);
+        markCanvasDirty(state);
+      }
+      return;
+    }
+    canvasSnapshotHistory(state);
+    d.text = text;
+    d.size = fmt.size;
+    d.bold = fmt.bold;
+    d.italic = fmt.italic;
+    canvasRenderVectors(state);
+    canvasRenderToolbar(state);
+    markCanvasDirty(state);
+  });
+}
+
+/* ---- drag-to-draw: pen / rect / ellipse / line / arrow (pointer listeners
+   on state.scrollEl, converted to world coords each move — mirrors the
+   reader's highlight/pen drag handling in setupReaderPageInteraction). ---- */
+
+function canvasStartShapeDraw(state, e) {
+  const tool = state.tool;
+  // Capture the pointer to scrollEl (like canvasStartPan does) so a real mouse
+  // drag keeps delivering pointermove/pointerup to THIS handler even as the
+  // cursor passes over the SVG vector layer or item cards. Without capture, the
+  // drag-based tools (pen/rect/ellipse/line/arrow) never received move events on
+  // a real drag and so never met their commit threshold — only the click-based
+  // sticky/text tools worked. preventDefault stops a native text-selection drag.
+  e.preventDefault();
+  try { state.scrollEl.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+  const rect = state.scrollEl.getBoundingClientRect();
+  const toWorld = (ev) => canvasScreenToWorld(state, ev.clientX - rect.left, ev.clientY - rect.top);
+  const startPt = toWorld(e);
+
+  if (tool === 'text') { canvasPlaceTextNote(state, startPt); return; }
+  if (tool === 'sticky') { canvasStartStickyDraw(state, e, toWorld, startPt); return; }
+
+  let draft;
+  if (tool === 'pen') draft = { id: canvasNewDrawingId(), type: 'pen', color: state.color, stroke: state.strokeWidth, points: [startPt] };
+  else if (tool === 'rect') draft = { id: canvasNewDrawingId(), type: 'rect', color: state.color, stroke: state.strokeWidth, x: startPt.x, y: startPt.y, w: 0, h: 0, fill: 'none' };
+  else if (tool === 'ellipse') draft = { id: canvasNewDrawingId(), type: 'ellipse', color: state.color, stroke: state.strokeWidth, x: startPt.x, y: startPt.y, w: 0, h: 0, fill: 'none' };
+  else if (tool === 'line') draft = { id: canvasNewDrawingId(), type: 'line', color: state.color, stroke: state.strokeWidth, x1: startPt.x, y1: startPt.y, x2: startPt.x, y2: startPt.y };
+  else if (tool === 'arrow') draft = { id: canvasNewDrawingId(), type: 'arrow', color: state.color, stroke: state.strokeWidth, x1: startPt.x, y1: startPt.y, x2: startPt.x, y2: startPt.y };
+  else return;
+
+  canvasRenderVectors(state, draft);
+
+  const onMove = (ev) => {
+    if (canvasState !== state) return;
+    const pt = toWorld(ev);
+    if (draft.type === 'pen') {
+      draft.points.push(pt);
+    } else if (draft.type === 'rect' || draft.type === 'ellipse') {
+      draft.x = Math.min(startPt.x, pt.x);
+      draft.y = Math.min(startPt.y, pt.y);
+      draft.w = Math.abs(pt.x - startPt.x);
+      draft.h = Math.abs(pt.y - startPt.y);
+    } else {
+      draft.x2 = pt.x;
+      draft.y2 = pt.y;
+    }
+    canvasRenderVectors(state, draft);
+  };
+  const finish = () => {
+    state.scrollEl.removeEventListener('pointermove', onMove);
+    state.scrollEl.removeEventListener('pointerup', finish);
+    state.scrollEl.removeEventListener('pointercancel', finish);
+    if (canvasState !== state) return;
+    let commit;
+    if (draft.type === 'pen') commit = draft.points.length > 1;
+    else if (draft.type === 'rect' || draft.type === 'ellipse') commit = draft.w > 2 && draft.h > 2;
+    else commit = Math.hypot(draft.x2 - draft.x1, draft.y2 - draft.y1) > 2;
+    if (commit) {
+      canvasSnapshotHistory(state);
+      state.drawings.push(draft);
+      markCanvasDirty(state);
+      canvasRenderToolbar(state);
+    }
+    canvasRenderVectors(state);
+  };
+  state.scrollEl.addEventListener('pointermove', onMove);
+  state.scrollEl.addEventListener('pointerup', finish);
+  state.scrollEl.addEventListener('pointercancel', finish);
+}
+
+// Sticky: click/drag defines the box (a plain click — no real drag — falls
+// back to a sensible default size), then immediately opens the text editor
+// so typing can start right away.
+function canvasStartStickyDraw(state, e, toWorld, startPt) {
+  const draft = { id: canvasNewDrawingId(), type: 'sticky', color: state.color, x: startPt.x, y: startPt.y, w: 0, h: 0, text: '' };
+  canvasRenderVectors(state, draft);
+
+  const onMove = (ev) => {
+    if (canvasState !== state) return;
+    const pt = toWorld(ev);
+    draft.x = Math.min(startPt.x, pt.x);
+    draft.y = Math.min(startPt.y, pt.y);
+    draft.w = Math.abs(pt.x - startPt.x);
+    draft.h = Math.abs(pt.y - startPt.y);
+    canvasRenderVectors(state, draft);
+  };
+  const finish = () => {
+    state.scrollEl.removeEventListener('pointermove', onMove);
+    state.scrollEl.removeEventListener('pointerup', finish);
+    state.scrollEl.removeEventListener('pointercancel', finish);
+    if (canvasState !== state) return;
+    if (draft.w < 20 || draft.h < 20) { draft.w = 180; draft.h = 140; } // a simple click -> default size
+    canvasSnapshotHistory(state);
+    state.drawings.push(draft);
+    markCanvasDirty(state);
+    canvasRenderToolbar(state);
+    canvasRenderVectors(state);
+    canvasSetTool(state, 'select'); // so a click-away commits instead of dropping another sticky
+    canvasEditDrawingText(state, draft); // prompt for text right away
+  };
+  state.scrollEl.addEventListener('pointermove', onMove);
+  state.scrollEl.addEventListener('pointerup', finish);
+  state.scrollEl.addEventListener('pointercancel', finish);
+}
+
+// Select-mode manipulation of drawings. Only box-shaped drawings (sticky/rect/
+// ellipse/text) are grab targets so a big pen stroke's bounding box doesn't
+// swallow pans. Topmost (last-drawn) wins.
+function canvasDrawingHitTest(state, pt) {
+  const ds = state.drawings || [];
+  for (let i = ds.length - 1; i >= 0; i--) {
+    const d = ds[i];
+    if (!(d.type === 'sticky' || d.type === 'rect' || d.type === 'ellipse' || d.type === 'text')) continue;
+    const b = canvasDrawingBounds(d);
+    if (!b) continue;
+    if (pt.x >= b.x - 4 && pt.x <= b.x + b.w + 4 && pt.y >= b.y - 4 && pt.y <= b.y + b.h + 4) return d;
+  }
+  return null;
+}
+
+function canvasDrawingIsResizable(d) {
+  return !!d && (d.type === 'sticky' || d.type === 'rect' || d.type === 'ellipse');
+}
+
+// Drag a hit drawing: near its bottom-right corner = resize, otherwise move.
+// All work is on the model + a full repaint (canvasRenderVectors), captured to
+// scrollEl so the drag survives the pointer crossing other elements.
+function canvasStartDrawingManipulate(state, e, d, startWpt) {
+  const rect = state.scrollEl.getBoundingClientRect();
+  const toWorld = (ev) => canvasScreenToWorld(state, ev.clientX - rect.left, ev.clientY - rect.top);
+  const b = canvasDrawingBounds(d);
+  const cornerTol = 14 / state.scale;
+  const mode = (canvasDrawingIsResizable(d)
+    && Math.abs(startWpt.x - (b.x + b.w)) <= cornerTol
+    && Math.abs(startWpt.y - (b.y + b.h)) <= cornerTol) ? 'resize' : 'move';
+  const orig = {
+    x: d.x, y: d.y, w: d.w, h: d.h,
+    x1: d.x1, y1: d.y1, x2: d.x2, y2: d.y2,
+    points: d.points ? d.points.map((p) => ({ x: p.x, y: p.y })) : null,
+  };
+  e.preventDefault();
+  try { state.scrollEl.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+  let moved = false;
+  const onMove = (ev) => {
+    if (canvasState !== state) return;
+    const p = toWorld(ev);
+    const dx = p.x - startWpt.x, dy = p.y - startWpt.y;
+    if (!moved) {
+      if (Math.hypot(dx, dy) < 3 / state.scale) return; // ignore jitter so a plain click still dbl-click-edits
+      moved = true;
+      canvasSnapshotHistory(state);
+    }
+    if (mode === 'resize') {
+      d.w = Math.max(24, orig.w + dx);
+      d.h = Math.max(24, orig.h + dy);
+    } else if (d.type === 'line' || d.type === 'arrow') {
+      d.x1 = orig.x1 + dx; d.y1 = orig.y1 + dy; d.x2 = orig.x2 + dx; d.y2 = orig.y2 + dy;
+    } else if (d.type === 'pen') {
+      d.points = orig.points.map((pp) => ({ x: pp.x + dx, y: pp.y + dy }));
+    } else {
+      d.x = orig.x + dx; d.y = orig.y + dy;
+    }
+    canvasRenderVectors(state);
+  };
+  const finish = () => {
+    state.scrollEl.removeEventListener('pointermove', onMove);
+    state.scrollEl.removeEventListener('pointerup', finish);
+    state.scrollEl.removeEventListener('pointercancel', finish);
+    if (moved) markCanvasDirty(state);
+    canvasRenderVectors(state);
+  };
+  state.scrollEl.addEventListener('pointermove', onMove);
+  state.scrollEl.addEventListener('pointerup', finish);
+  state.scrollEl.addEventListener('pointercancel', finish);
 }
 
 /* ---------- study view (Step 6): split notes list + preview/reading pane ---------- */
@@ -3374,7 +7228,9 @@ function renderMath(el) {
     window.renderMathInElement(el, {
       delimiters: [
         { left: '$$', right: '$$', display: true },
+        { left: '\\[', right: '\\]', display: true },  // round 6: renderRichText also protects these from markdown
         { left: '$', right: '$', display: false },
+        { left: '\\(', right: '\\)', display: false },  // round 6
       ],
       throwOnError: false,
     });
@@ -4298,8 +8154,10 @@ async function route() {
   quizStopPoll();
   stopJobPolling();
   closeReader();
+  stopCanvas();
   updateSidebarActive();
   const hash = location.hash || '#/';
+  const canvas = hash.match(/^#\/course\/(\d+)\/canvas(?:\/(\d+))?/);
   const study = hash.match(/^#\/course\/(\d+)\/study(?:\/(\d+))?/);
   const scheduleStudy = hash.match(/^#\/study(?:\/(\d+))?$/);
   const coursesList = hash.match(/^#\/courses\/?$/);
@@ -4308,6 +8166,7 @@ async function route() {
   const course = hash.match(/^#\/course\/(\d+)/);
   try {
     if (quizView) await renderQuiz(quizView[1]);
+    else if (canvas) await renderCanvasView(canvas[1], canvas[2], /[?&]from=schedule/.test(hash) ? 'schedule' : 'course');
     else if (study) await renderStudyView(study[1], study[2]);
     else if (scheduleStudy) await renderScheduleStudy(scheduleStudy[1]);
     else if (coursesList) await renderCourses();
@@ -4341,8 +8200,13 @@ document.addEventListener('click', (e) => {
   }
   else if (a === 'open-lesson') {
     const cid = t.dataset.courseId;
+    const conceptId = t.dataset.conceptId;
     const nid = t.dataset.noteId;
-    location.hash = nid ? `#/course/${cid}/study/${nid}` : `#/course/${cid}`;
+    // Build 9 Phase 2a: the canvas replaces the old study window — prefer the
+    // concept id (always present on this row's schedule item); fall back to
+    // the old note-based route only if it's somehow missing.
+    if (conceptId) location.hash = `#/course/${cid}/canvas/${conceptId}`;
+    else location.hash = nid ? `#/course/${cid}/study/${nid}` : `#/course/${cid}`;
   }
   else if (a === 'del-semester') delSemester(t.dataset.id, t.dataset.name);
   else if (a === 'archive-semester') archiveSemester(t.dataset.id, t.dataset.name);
@@ -4358,15 +8222,65 @@ document.addEventListener('click', (e) => {
   else if (a === 'regen-all') confirmRegenAll(t.dataset.id);
   else if (a === 'note-customize') noteCustomizeModal(t.dataset.id);
   else if (a === 'cancel-job') cancelJob(t.dataset.id);
-  else if (a === 'open-note') location.hash = `#/course/${t.dataset.courseId}/study/${t.dataset.noteId}`;
-  else if (a === 'open-study') location.hash = `#/course/${t.dataset.id}/study`;
+  else if (a === 'open-note') {
+    // Build 9 Phase 2a: canvas replaces the study window. Notes always carry
+    // concept_id; fall back to the old study route only if it's missing.
+    location.hash = t.dataset.conceptId
+      ? `#/course/${t.dataset.courseId}/canvas/${t.dataset.conceptId}`
+      : `#/course/${t.dataset.courseId}/study/${t.dataset.noteId}`;
+  }
+  else if (a === 'open-study') openCourseCanvas(t.dataset.id);
   else if (a === 'note-error') showNoteError(t.dataset.noteId, t.dataset.title);
   else if (a === 'retry-note') { e.stopPropagation(); retryNote(t.dataset.noteId); }
   else if (a === 'study-select') studySelectNote(t.dataset.noteId);
   else if (a === 'study-open-reading') studyOpenReading();
   else if (a === 'study-close-reading') studyCollapseReading();
   else if (a === 'study-error') showNoteError(t.dataset.noteId, t.dataset.title);
-  else if (a === 'open-schedule-lesson') { location.hash = '#/study/' + t.dataset.itemId; }
+  else if (a === 'open-schedule-lesson') {
+    // Build 9 Phase 2a: schedule rows already carry course_id + concept_id
+    // (SCHEDULE_SELECT in schedule.py already selects both — no backend
+    // change needed here); fall back to the old cross-course study route
+    // only if either is somehow missing.
+    location.hash = (t.dataset.courseId && t.dataset.conceptId)
+      ? `#/course/${t.dataset.courseId}/canvas/${t.dataset.conceptId}?from=schedule`
+      : '#/study/' + t.dataset.itemId;
+  }
+  else if (a === 'canvas-select-lesson') {
+    // In-place switch (course OR schedule mode; canvasSwitchLesson handles a
+    // cross-course target in schedule mode). Fall back to a hash nav only if the
+    // canvas isn't mounted.
+    if (canvasState) canvasSwitchLesson(canvasState, t.dataset.conceptId, t.dataset.courseId);
+    else location.hash = `#/course/${t.dataset.courseId}/canvas/${t.dataset.conceptId}`;
+  }
+  else if (a === 'canvas-toggle-sidebar') canvasToggleSidebar(t.dataset.side);
+  else if (a === 'canvas-zoom-in') { if (canvasState) canvasZoomCenter(canvasState, 1.2); }
+  else if (a === 'canvas-zoom-out') { if (canvasState) canvasZoomCenter(canvasState, 1 / 1.2); }
+  else if (a === 'canvas-zoom-reset') { if (canvasState) canvasFitToView(canvasState); }
+  else if (a === 'canvas-lightbox-close') canvasCloseLightbox();
+  else if (a === 'canvas-lightbox-ask') { if (canvasLightboxState) canvasLightboxAskWhole(canvasLightboxState); }
+  else if (a === 'canvas-lightbox-snip') { if (canvasLightboxState) canvasLightboxToggleSnip(canvasLightboxState); }
+  else if (a === 'canvas-lightbox-answer-close') { if (canvasLightboxState) canvasLightboxCloseAnswerPanel(canvasLightboxState); }
+  else if (a === 'canvas-lightbox-pin') { if (canvasLightboxState) canvasLightboxPin(canvasLightboxState); }
+  else if (a === 'canvas-lightbox-send') { if (canvasLightboxState) canvasLightboxSendFollowUp(canvasLightboxState); }
+  else if (a === 'canvas-pan-to-item') { if (canvasState) canvasPanToItem(canvasState, t.dataset.itemId); }
+  else if (a === 'canvas-item-delete') { e.stopPropagation(); if (canvasState) canvasRequestDeleteItem(canvasState, t.dataset.itemId); }
+  else if (a === 'canvas-rename-file') { e.stopPropagation(); if (canvasState) canvasRenameFileModal(canvasState, t.dataset.fileId); }
+  else if (a === 'canvas-rename-note') { e.stopPropagation(); if (canvasState) canvasRenameNoteModal(canvasState); }
+  else if (a === 'canvas-delete-file') { e.stopPropagation(); if (canvasState) canvasRequestDeleteFile(canvasState, t.dataset.fileId); }
+  else if (a === 'canvas-open-convo') {
+    // Round 8 item 2: pan the board to the card first (so the user sees where
+    // it lives), THEN open the chat overlay on top of it.
+    if (canvasState) {
+      canvasPanToItem(canvasState, t.dataset.itemId);
+      openAiConversation(canvasState.itemsById.get(t.dataset.itemId));
+    }
+  }
+  else if (a === 'canvas-delete-convo') { e.stopPropagation(); if (canvasState) canvasRequestDeleteItem(canvasState, t.dataset.itemId); }
+  else if (a === 'canvas-tool') { if (canvasState) canvasSetTool(canvasState, t.dataset.tool); }
+  else if (a === 'canvas-color') { if (canvasState) canvasSetColor(canvasState, t.dataset.color); }
+  else if (a === 'canvas-stroke') { if (canvasState) canvasSetStroke(canvasState, t.dataset.width); }
+  else if (a === 'canvas-undo') { if (canvasState) canvasUndo(canvasState); }
+  else if (a === 'canvas-redo') { if (canvasState) canvasRedo(canvasState); }
   else if (a === 'sched-select') schedSelect(t.dataset.itemId);
   else if (a === 'sched-open-reading') schedOpenReading();
   else if (a === 'sched-close-reading') schedCollapseReading();
@@ -4379,6 +8293,23 @@ document.addEventListener('click', (e) => {
   else if (a === 'reader-zoom-in') readerZoom(readerState, 1.2);
   else if (a === 'reader-zoom-out') readerZoom(readerState, 1 / 1.2);
   else if (a === 'reader-zoom-reset') readerZoom(readerState, 'reset');
+  else if (a === 'reader-snip') { if (readerState && readerState.ask) readerToggleSnip(readerState); }
+  else if (a === 'reader-ask-open') { if (readerState && readerState.ask) readerAskOpenPanel(readerState); }
+  else if (a === 'reader-ask-close') { if (readerState && readerState.ask) readerAskClosePanel(readerState); }
+  else if (a === 'reader-ask-chip') { if (readerState && readerState.ask) readerAskChipClick(readerState, t.dataset.mode); }
+  else if (a === 'reader-ask-menu-dismiss') {
+    // Round 8 item 5: an explicit "deselect" — clears the live selection (so
+    // the menu, which now tracks the selection through scroll instead of
+    // hiding on it, actually goes away) rather than just hiding the menu
+    // while leaving text highlighted.
+    if (readerState && readerState.ask) {
+      try { window.getSelection().removeAllRanges(); } catch (e) { /* ignore */ }
+      readerAskMenuHide(readerState);
+    }
+  }
+  else if (a === 'reader-ask-send') { if (readerState && readerState.ask) readerAskSendFollowUp(readerState); }
+  else if (a === 'reader-ask-pin') { if (readerState && readerState.ask) readerAskPinToCanvas(readerState); }
+  else if (a === 'canvas-ai-close') closeAiConversation();
   else if (a === 'new-exam') newExam(t.dataset.id);
   else if (a === 'edit-exam') editExam(t.dataset.examId);
   else if (a === 'del-exam') delExam(t.dataset.examId, t.dataset.name);
@@ -4408,7 +8339,10 @@ document.addEventListener('click', (e) => {
   else if (a === 'logout') logout();
 });
 
-/* ---------- Auth gate (Build 6, single account; redesigned Build 7 Phase 2) ----------
+/* ---------- Auth gate (Build 6, single account; redesigned Build 7 Phase 2;
+   MAJOR visual/interaction redesign Build 9 round 8 item 7 — split hero +
+   form layout, animated mode transitions, floating labels, strength meter,
+   success micro-animation; auth LOGIC/ids/validation all unchanged) ----------
    Before the app boots, GET /auth/status: if not authenticated we mount a
    full-screen signup/login/forgot-password screen (over a cursor-reactive
    animated background, auth-only) and stop; once authenticated we enter the
@@ -4423,7 +8357,8 @@ let authRegistered = false;   // from GET /auth/status — picks the default scr
 let authForgotStep = 'email'; // 'email' | 'reset' — two-step forgot-password flow
 let authForgotEmail = '';
 let authForgotQuestion = '';
-let authBgController = null;  // { el, teardown() } for the animated background, or null
+let authBgController = null;   // { el, teardown() } for the animated background, or null
+let authHeroController = null; // { teardown() } for the hero panel (tagline rotator), or null
 let appEntered = false;
 
 const SECURITY_QUESTIONS = [
@@ -4436,16 +8371,88 @@ const SECURITY_QUESTIONS = [
 
 function isValidEmail(v) { return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v); }
 
-// A password <input> with a Show/Hide toggle button (id="au-toggle", wired in
-// renderAuthScreen). Only one is ever on screen at a time across modes/steps.
-function authPasswordFieldHtml(id, placeholder, autocomplete) {
-  return `<div class="relative"><input id="${id}" type="password" class="${inputCls} pr-14" placeholder="${esc(placeholder)}" autocomplete="${autocomplete}"><button type="button" id="au-toggle" class="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-neutral-400 hover:text-neutral-700">Show</button></div>`;
+const AUTH_EYE_ICON =
+  '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
+const AUTH_EYE_OFF_ICON =
+  '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.9 10.9 0 0 1 12 5c7 0 10.5 7 10.5 7a13.9 13.9 0 0 1-3.15 4.15M6.6 6.6C3.4 8.5 1.5 12 1.5 12s3.5 7 10.5 7a10.4 10.4 0 0 0 5.4-1.5"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
+// pathLength="100" normalizes stroke-dasharray/stroke-dashoffset to 0-100
+// regardless of the path's actual geometric length, so the CSS "draw-in"
+// animation (theme.css .auth-success-ring/.auth-success-tick) is exact.
+const AUTH_CHECK_ICON =
+  '<svg viewBox="0 0 52 52" width="52" height="52" fill="none"><circle class="auth-success-ring" cx="26" cy="26" r="24" pathLength="100" stroke="currentColor" stroke-width="2.5"/><path class="auth-success-tick" d="M15 27l7 7 15-15" pathLength="100" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>';
+
+// Rotating hero value-props (purely presentational — cycled by mountAuthHero()).
+const AUTH_TAGLINES = [
+  'Concepts extracted straight from your own study materials.',
+  'Every note ends with practice styled on real past exam questions.',
+  'A daily study plan that adapts as your exams get closer.',
+  'Ask AI about anything, right inside your notes.',
+];
+
+// Purely visual password-strength heuristic (0-4). Never gates submission —
+// the real rule stays "≥6 characters", enforced only in the submit handler.
+function authPasswordStrength(pw) {
+  if (!pw) return { score: 0, label: '' };
+  let score = 0;
+  if (pw.length >= 6) score++;
+  if (pw.length >= 10) score++;
+  if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) score++;
+  if (/[0-9]/.test(pw) && /[^A-Za-z0-9]/.test(pw)) score++;
+  score = Math.min(score, 4);
+  const labels = ['Too short', 'Weak', 'Fair', 'Good', 'Strong'];
+  return { score, label: labels[score] };
+}
+
+// A floating-label field for the auth screen. Keeps a real <label for="…">
+// (accessible) as a sibling AFTER the control so CSS (:focus/:not(:placeholder-shown))
+// can float it — see theme.css §5. `type`: 'text' | 'email' | 'password'
+// (with a show/hide toggle, id="au-toggle") | 'password-plain' (no toggle,
+// e.g. confirm-password) | 'select'.
+function authField(opts) {
+  const { id, label, type = 'text', autocomplete = 'off', hint = '', options = null, value = '' } = opts;
+  let controlHtml;
+  let wrapClass = 'auth-field auth-anim-row';
+  if (type === 'select') {
+    wrapClass += ' auth-field--select';
+    const optsHtml = (options || []).map((q) => `<option value="${esc(q)}">${esc(q)}</option>`).join('');
+    controlHtml = `<select id="${id}" class="auth-input" autocomplete="${autocomplete}">${optsHtml}</select>`;
+  } else if (type === 'password') {
+    wrapClass += ' auth-field--password';
+    controlHtml =
+      `<input id="${id}" type="password" class="auth-input" placeholder=" " autocomplete="${autocomplete}" value="${esc(value)}">` +
+      `<button type="button" id="au-toggle" class="auth-toggle-btn" aria-label="Show password">${AUTH_EYE_ICON}</button>`;
+  } else if (type === 'password-plain') {
+    controlHtml = `<input id="${id}" type="password" class="auth-input" placeholder=" " autocomplete="${autocomplete}" value="${esc(value)}">`;
+  } else {
+    controlHtml = `<input id="${id}" type="${type}" class="auth-input" placeholder=" " autocomplete="${autocomplete}" value="${esc(value)}">`;
+  }
+  // The input + (optional) toggle + label live in an inner .auth-field-control
+  // (the positioning context). The hint sits BELOW that control — so the
+  // absolutely-positioned floating label centers against the INPUT's height
+  // only, not the input+hint (which used to drop it to the bottom on hinted
+  // fields). The label stays a sibling of the input, so the `~` float
+  // selectors still match.
+  return `<div class="${wrapClass}">
+    <div class="auth-field-control">
+      ${controlHtml}
+      <label for="${id}" class="auth-label">${esc(label)}</label>
+    </div>
+    ${hint ? `<span class="auth-hint">${esc(hint)}</span>` : ''}
+  </div>`;
+}
+
+// Strength meter shown only under a NEW-password field (signup password,
+// forgot-reset new password) — never under an existing-password login field.
+function authStrengthMeterHtml() {
+  return `<div class="auth-strength auth-anim-row" id="au-strength" data-score="0" aria-hidden="true">
+    <div class="auth-strength-track"><div class="auth-strength-fill"></div></div>
+    <span class="auth-strength-label"></span>
+  </div>`;
 }
 
 function authScreenHtml(mode, initialError) {
-  const errHtml = initialError
-    ? `<p id="au-error" class="rounded-xl bg-red-50 px-3.5 py-2.5 text-xs font-medium text-red-600">${esc(initialError)}</p>`
-    : `<p id="au-error" class="hidden rounded-xl bg-red-50 px-3.5 py-2.5 text-xs font-medium text-red-600"></p>`;
+  const errClass = 'auth-error rounded-xl bg-red-50 px-3.5 py-2.5 text-xs font-medium text-red-600' + (initialError ? ' show' : '');
+  const errHtml = `<p id="au-error" class="${errClass}" role="alert" aria-live="assertive">${initialError ? esc(initialError) : ''}</p>`;
 
   let heading, sub, submitLabel, bodyHtml, footerHtml;
 
@@ -4454,12 +8461,13 @@ function authScreenHtml(mode, initialError) {
     sub = 'Set up Axiom to start studying smarter.';
     submitLabel = 'Create account';
     bodyHtml = `
-      ${field('Name', `<input id="au-name" class="${inputCls}" placeholder="Your name" autocomplete="name">`)}
-      ${field('Email', `<input id="au-email" type="email" class="${inputCls}" placeholder="you@example.com" autocomplete="email">`)}
-      ${field('Password', authPasswordFieldHtml('au-password', 'At least 6 characters', 'new-password'))}
-      ${field('Confirm password', `<input id="au-confirm" type="password" class="${inputCls}" placeholder="Re-enter password" autocomplete="new-password">`)}
-      ${field('Security question', `<select id="au-secq" class="${inputCls}">${SECURITY_QUESTIONS.map((q) => `<option value="${esc(q)}">${esc(q)}</option>`).join('')}</select>`)}
-      ${field('Security answer', `<input id="au-secans" class="${inputCls}" placeholder="Your answer" autocomplete="off">`, 'Used only to reset your password if you ever forget it.')}
+      ${authField({ id: 'au-name', label: 'Name', autocomplete: 'name' })}
+      ${authField({ id: 'au-email', label: 'Email', type: 'email', autocomplete: 'email' })}
+      ${authField({ id: 'au-password', label: 'Password', type: 'password', autocomplete: 'new-password', hint: 'At least 6 characters' })}
+      ${authStrengthMeterHtml()}
+      ${authField({ id: 'au-confirm', label: 'Confirm password', type: 'password-plain', autocomplete: 'new-password' })}
+      ${authField({ id: 'au-secq', label: 'Security question', type: 'select', options: SECURITY_QUESTIONS })}
+      ${authField({ id: 'au-secans', label: 'Security answer', autocomplete: 'off', hint: 'Used only to reset your password if you ever forget it.' })}
     `;
     footerHtml = `<p class="mt-5 text-center text-sm text-muted">Already have an account? <button type="button" data-auth-link="login" class="link font-medium">Log in</button></p>`;
   } else if (mode === 'login') {
@@ -4467,8 +8475,8 @@ function authScreenHtml(mode, initialError) {
     sub = 'Log in to pick up where you left off.';
     submitLabel = 'Log in';
     bodyHtml = `
-      ${field('Email', `<input id="au-email" type="email" class="${inputCls}" placeholder="you@example.com" autocomplete="email">`)}
-      ${field('Password', authPasswordFieldHtml('au-password', 'Your password', 'current-password'))}
+      ${authField({ id: 'au-email', label: 'Email', type: 'email', autocomplete: 'email' })}
+      ${authField({ id: 'au-password', label: 'Password', type: 'password', autocomplete: 'current-password' })}
     `;
     footerHtml = `
       <div class="mt-5 flex items-center justify-between text-sm">
@@ -4482,36 +8490,100 @@ function authScreenHtml(mode, initialError) {
       sub = 'Answer your security question to set a new password.';
       submitLabel = 'Reset password';
       bodyHtml = `
-        <div>
-          <span class="text-sm font-medium text-neutral-700">Security question</span>
-          <div class="mt-1.5 rounded-xl surface-2 px-3.5 py-2.5 text-sm text-ink">${esc(authForgotQuestion)}</div>
+        <div class="auth-anim-row auth-secq-display">
+          <span class="auth-secq-display-label">Security question</span>
+          <div class="auth-secq-display-value">${esc(authForgotQuestion)}</div>
         </div>
-        ${field('Answer', `<input id="au-secans" class="${inputCls}" placeholder="Your answer" autocomplete="off">`)}
-        ${field('New password', authPasswordFieldHtml('au-password', 'At least 6 characters', 'new-password'))}
-        ${field('Confirm new password', `<input id="au-confirm" type="password" class="${inputCls}" placeholder="Re-enter new password" autocomplete="new-password">`)}
+        ${authField({ id: 'au-secans', label: 'Answer', autocomplete: 'off' })}
+        ${authField({ id: 'au-password', label: 'New password', type: 'password', autocomplete: 'new-password', hint: 'At least 6 characters' })}
+        ${authStrengthMeterHtml()}
+        ${authField({ id: 'au-confirm', label: 'Confirm new password', type: 'password-plain', autocomplete: 'new-password' })}
       `;
     } else {
       sub = "Enter your account email and we'll show your security question.";
       submitLabel = 'Continue';
-      bodyHtml = `${field('Email', `<input id="au-email" type="email" class="${inputCls}" placeholder="you@example.com" autocomplete="email" value="${esc(authForgotEmail)}">`)}`;
+      bodyHtml = `${authField({ id: 'au-email', label: 'Email', type: 'email', autocomplete: 'email', value: authForgotEmail })}`;
     }
     footerHtml = `<p class="mt-5 text-center text-sm text-muted"><button type="button" data-auth-link="login" class="link font-medium">Back to log in</button></p>`;
   }
 
   return `
-    <div class="w-full max-w-sm">
-      <div class="mb-4 flex flex-col items-center text-center">
-        <div class="auth-monogram mb-3">A</div>
-        <h1 class="text-xl font-semibold tracking-tight text-ink">${esc(heading)}</h1>
-        <p class="mt-1 text-sm text-muted">${esc(sub)}</p>
+    <div class="auth-card">
+      <div class="auth-card-head">
+        <h1 class="auth-card-heading">${esc(heading)}</h1>
+        <p class="auth-card-sub">${esc(sub)}</p>
       </div>
-      <form id="auth-form" class="modal-card space-y-3 p-6">
+      <form id="auth-form" novalidate>
         ${bodyHtml}
         ${errHtml}
-        <button type="submit" id="au-submit" class="${btnPrimary} btn-pill w-full py-2 text-[0.95rem]">${esc(submitLabel)}</button>
+        <button type="submit" id="au-submit" class="${btnPrimary} btn-pill w-full py-2.5 text-[0.95rem] auth-submit-btn auth-anim-row">
+          <span class="auth-spinner" aria-hidden="true"></span>
+          <span class="auth-submit-label">${esc(submitLabel)}</span>
+        </button>
       </form>
-      ${footerHtml}
+      <div class="auth-card-foot">${footerHtml}</div>
     </div>`;
+}
+
+// The brand/hero panel (left column on wide viewports, compact top band when
+// stacked). Mounted once per auth-gate lifetime (independent of mode swaps)
+// so its tagline rotator keeps a stable timer — see mountAuthHero/teardownAuthHero.
+function authHeroHtml() {
+  return `
+    <div class="auth-hero-inner">
+      <div class="auth-hero-brand">
+        <div class="auth-monogram auth-monogram-lg">A</div>
+        <span class="auth-wordmark">Axiom</span>
+      </div>
+      <h2 class="auth-hero-title">Study smarter,<br>not longer.</h2>
+      <div class="auth-tagline" id="auth-tagline"></div>
+      <div class="auth-hero-motifs" aria-hidden="true">
+        <div class="auth-motif auth-motif-1"><span class="dot dot-mint"></span>Concept notes, auto-generated</div>
+        <div class="auth-motif auth-motif-2"><span class="dot dot-sky"></span>Practice quizzes, instantly</div>
+        <div class="auth-motif auth-motif-3"><span class="dot dot-peach"></span>A study plan that adapts</div>
+      </div>
+    </div>`;
+}
+
+// Mounts the hero panel + starts the tagline rotator (skipped under
+// prefers-reduced-motion — a single static tagline instead). Idempotent like
+// mountAuthBg. Torn down in enterApp() via teardownAuthHero().
+function mountAuthHero(container) {
+  if (!container) return;
+  teardownAuthHero();
+  container.innerHTML = authHeroHtml();
+  const taglineEl = container.querySelector('#auth-tagline');
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let idx = 0;
+  const paint = () => {
+    if (!taglineEl) return;
+    taglineEl.innerHTML = `<span class="auth-tagline-text">${esc(AUTH_TAGLINES[idx])}</span>`;
+  };
+  paint();
+  let timer = null;
+  if (!reduced && taglineEl) {
+    timer = setInterval(() => {
+      const cur = taglineEl.querySelector('.auth-tagline-text');
+      if (cur) cur.classList.add('auth-tagline-exit');
+      setTimeout(() => {
+        idx = (idx + 1) % AUTH_TAGLINES.length;
+        paint();
+      }, 260);
+    }, 4200);
+  }
+  authHeroController = {
+    teardown() {
+      if (timer) clearInterval(timer);
+      container.innerHTML = '';
+    },
+  };
+}
+
+function teardownAuthHero() {
+  if (authHeroController) {
+    authHeroController.teardown();
+    authHeroController = null;
+  }
 }
 
 // Cursor-reactive animated background (auth screen only — DESIGN.md §8).
@@ -4601,34 +8673,79 @@ function showAuthGate(status) {
     screen.id = 'auth-screen';
     screen.className = 'fixed inset-0 z-[70] overflow-y-auto bg-paper';
     // The scroll lives on #auth-screen; an inner min-h-full flex wrapper centers
-    // the card when it fits and top-aligns it (fully reachable, logo never clipped)
-    // when a short viewport can't hold it — instead of centering+overflow on the
-    // same element, which clips the top.
+    // the shell when it fits and top-aligns it (fully reachable, logo never
+    // clipped) when a short viewport can't hold it — instead of centering+
+    // overflow on the same element, which clips the top. .auth-shell is a
+    // responsive 2-col grid (hero | form panel) that stacks on narrow/short
+    // viewports (theme.css §5).
     screen.innerHTML = '<div id="auth-bg-slot"></div>'
-      + '<div class="relative z-10 min-h-full flex items-center justify-center px-6 py-8">'
-      + '<div id="auth-card-slot" class="flex w-full justify-center"></div></div>';
+      + '<div class="relative z-10 min-h-full flex items-center justify-center px-6 py-10">'
+      + '<div class="auth-shell">'
+      + '<div class="auth-hero" id="auth-hero-slot"></div>'
+      + '<div class="auth-panel"><div id="auth-card-slot"></div></div>'
+      + '</div></div>';
     document.body.appendChild(screen);
     mountAuthBg(document.getElementById('auth-bg-slot'));
+    mountAuthHero(document.getElementById('auth-hero-slot'));
   }
   renderAuthScreen();
 }
 
-function renderAuthScreen(initialError) {
-  const screen = document.getElementById('auth-screen');
-  if (!screen) return;
-  const slot = screen.querySelector('#auth-card-slot') || screen;
-  slot.innerHTML = authScreenHtml(authMode, initialError);
+// A brief success moment (checkmark draw-in) shown after a successful
+// signup/login/reset, right before enterApp() tears the gate down. Purely
+// presentational — resolves immediately under reduced motion.
+function authCelebrate(slot, message) {
+  return new Promise((resolve) => {
+    const card = slot.querySelector('.auth-card');
+    if (!card) return resolve();
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    card.innerHTML = `<div class="auth-success">
+      <div class="auth-success-icon">${AUTH_CHECK_ICON}</div>
+      <p class="auth-success-msg">${esc(message)}</p>
+    </div>`;
+    if (reduced) return resolve();
+    setTimeout(resolve, 620);
+  });
+}
+
+// Wires up the (mode-specific) markup just injected into #auth-card-slot:
+// password show/hide, the strength meter, mode-switch links, and the submit
+// handler. Validation rules, endpoints, and enterApp() are UNCHANGED from the
+// pre-redesign version — only presentation (icons, busy/spinner state, the
+// success beat) was added around them.
+function wireAuthCard(slot) {
   const form = slot.querySelector('#auth-form');
   const errEl = slot.querySelector('#au-error');
   const pw = slot.querySelector('#au-password');
   const toggle = slot.querySelector('#au-toggle');
   const submit = slot.querySelector('#au-submit');
-  const showErr = (msg) => { errEl.textContent = msg; errEl.classList.remove('hidden'); };
+  const submitLabelEl = submit ? submit.querySelector('.auth-submit-label') : null;
+  const strengthEl = slot.querySelector('#au-strength');
+  if (!form || !errEl || !submit) return;
+
+  const showErr = (msg) => {
+    errEl.textContent = msg;
+    errEl.classList.add('show');
+  };
+
   if (toggle && pw) toggle.addEventListener('click', () => {
     const showing = pw.type === 'text';
     pw.type = showing ? 'password' : 'text';
-    toggle.textContent = showing ? 'Show' : 'Hide';
+    toggle.innerHTML = showing ? AUTH_EYE_ICON : AUTH_EYE_OFF_ICON;
+    toggle.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
   });
+
+  if (pw && strengthEl) {
+    const fillLabel = strengthEl.querySelector('.auth-strength-label');
+    const updateStrength = () => {
+      const { score, label } = authPasswordStrength(pw.value);
+      strengthEl.dataset.score = String(score);
+      if (fillLabel) fillLabel.textContent = pw.value ? label : '';
+    };
+    pw.addEventListener('input', updateStrength);
+    updateStrength();
+  }
+
   const firstInput = slot.querySelector('input, select');
   if (firstInput) firstInput.focus();
 
@@ -4642,13 +8759,14 @@ function renderAuthScreen(initialError) {
 
   const setBusy = (busy, label) => {
     submit.disabled = busy;
-    submit.textContent = busy ? label : submit.dataset.origLabel;
+    submit.classList.toggle('is-busy', busy);
+    if (submitLabelEl) submitLabelEl.textContent = busy ? label : submit.dataset.origLabel;
   };
-  submit.dataset.origLabel = submit.textContent;
+  submit.dataset.origLabel = submitLabelEl ? submitLabelEl.textContent : submit.textContent;
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    errEl.classList.add('hidden');
+    errEl.classList.remove('show');
 
     if (authMode === 'signup') {
       const name = (slot.querySelector('#au-name').value || '').trim();
@@ -4666,6 +8784,7 @@ function renderAuthScreen(initialError) {
       setBusy(true, 'Creating…');
       try {
         await api.post('/auth/signup', { name, email, password, security_question: secQ, security_answer: secAns });
+        await authCelebrate(slot, `Welcome, ${name.split(' ')[0] || 'there'}!`);
         enterApp();
       } catch (err) {
         setBusy(false);
@@ -4679,6 +8798,7 @@ function renderAuthScreen(initialError) {
       setBusy(true, 'Logging in…');
       try {
         await api.post('/auth/login', { email, password });
+        await authCelebrate(slot, 'Welcome back!');
         enterApp();
       } catch (err) {
         setBusy(false);
@@ -4710,6 +8830,7 @@ function renderAuthScreen(initialError) {
       setBusy(true, 'Resetting…');
       try {
         await api.post('/auth/reset', { email: authForgotEmail, security_answer: secAns, new_password: password });
+        await authCelebrate(slot, 'Password reset!');
         enterApp();
       } catch (err) {
         setBusy(false);
@@ -4721,6 +8842,108 @@ function renderAuthScreen(initialError) {
   });
 }
 
+// Renders authScreenHtml(authMode) into #auth-card-slot. The very first mount
+// (or under reduced motion) swaps instantly — no JS choreography, just the
+// plain CSS entrance animations on .auth-card/.auth-anim-row.
+//
+// A MODE change instead runs one deterministic sequence, keyed off real
+// animation/transition-end events rather than a pile of racing setTimeouts
+// (that pile-up was the source of the flicker/lag):
+//   1. Freeze the slot at its CURRENT height and clip overflow only for this
+//      window (.auth-card-slot-animating — see theme.css; overflow:hidden is
+//      never the resting state, which is also the Bug-1 fix).
+//   2. Fade the outgoing card out in place (.auth-card-leaving); wait for
+//      that animation's `animationend`.
+//   3. Swap the DOM (mount the new card). Its own entrance animation
+//      (authCardIn) already gives a single, calm content fade — the
+//      per-field stagger is skipped for switches (it would just compete with
+//      the height morph and read busy); the very first mount keeps it.
+//   4. Measure the new card's natural height and morph the slot to it with
+//      ONE `height` transition, started on the next frame.
+//   5. On that transition's `transitionend` (propertyName === 'height'),
+//      clear the inline height/transition and the clipping class — so the
+//      slot is left with no leftover inline styles at rest.
+// Each stage also has a generous fallback timer purely as a safety net (in
+// case an end-event never fires, e.g. a hidden tab); it is not the driver.
+//
+// authTransitionInterrupt: if the user switches modes again (clicks another
+// link) before a previous switch has settled, that earlier in-flight sequence
+// is force-settled synchronously before the new one starts — so two
+// sequences never race on the same shared inline styles.
+let authTransitionInterrupt = null;
+function renderAuthScreen(initialError) {
+  const screen = document.getElementById('auth-screen');
+  if (!screen) return;
+  const slot = screen.querySelector('#auth-card-slot');
+  if (!slot) return;
+
+  if (authTransitionInterrupt) {
+    const prev = authTransitionInterrupt;
+    authTransitionInterrupt = null;
+    prev();
+  }
+
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const prevCard = slot.querySelector('.auth-card');
+
+  const mount = (isSwitch) => {
+    slot.innerHTML = authScreenHtml(authMode, initialError);
+    if (isSwitch) {
+      // On a mode switch the content is swapped INSTANTLY at full opacity — no
+      // fade in or out at all — so there is never a frame where the card is
+      // blank. (The old approach faded the outgoing card fully to opacity 0,
+      // THEN mounted the incoming card which faded in FROM opacity 0, leaving a
+      // visible gap where neither card was shown.) The only motion is the
+      // height morph below, which reveals/collapses the new card smoothly via
+      // the slot's overflow:hidden.
+      slot.querySelectorAll('.auth-anim-row').forEach((row) => { row.style.animation = 'none'; });
+      const card = slot.querySelector('.auth-card');
+      if (card) card.style.animation = 'none'; // suppress authCardIn (opacity 0→1)
+    }
+    wireAuthCard(slot);
+  };
+
+  const settle = () => {
+    slot.style.height = '';
+    slot.style.transition = '';
+    slot.classList.remove('auth-card-slot-animating');
+    authTransitionInterrupt = null;
+  };
+
+  if (!prevCard || reduced) {
+    mount(false);
+    return;
+  }
+
+  // Freeze the current height, swap the content instantly (full opacity), then
+  // morph the slot height old→new. The card is always fully visible — clipped
+  // to the animating height by .auth-card-slot-animating's overflow:hidden — so
+  // no blank frame ever appears.
+  const startH = slot.getBoundingClientRect().height;
+  slot.style.height = startH + 'px';
+  slot.classList.add('auth-card-slot-animating');
+
+  mount(true);
+  const newCard = slot.querySelector('.auth-card');
+  const endH = newCard ? newCard.getBoundingClientRect().height : startH;
+
+  let morphed = false;
+  const morphFallback = window.setTimeout(finishMorph, 420);
+  function finishMorph(e) {
+    if (morphed) return;
+    if (e && (e.target !== slot || e.propertyName !== 'height')) return;
+    morphed = true;
+    window.clearTimeout(morphFallback);
+    slot.removeEventListener('transitionend', finishMorph);
+    settle();
+  }
+  slot.addEventListener('transitionend', finishMorph);
+  authTransitionInterrupt = () => finishMorph(null);
+
+  slot.style.transition = 'height .3s var(--ease-spring)';
+  requestAnimationFrame(() => { slot.style.height = endH + 'px'; });
+}
+
 async function logout() {
   try { await api.post('/auth/logout', {}); } catch (_) {}
   window.location.reload();
@@ -4728,6 +8951,7 @@ async function logout() {
 
 function enterApp() {
   teardownAuthBg();
+  teardownAuthHero();
   const el = document.getElementById('auth-screen');
   if (el) el.remove();
   if (appEntered) { route(); return; }

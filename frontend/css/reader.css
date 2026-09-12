@@ -330,3 +330,373 @@
   font-size: 0.75rem;
   font-weight: 600;
 }
+
+/* ---------- "Ask AI" (Phase B) ----------
+   Everything below lives INSIDE .reader-overlay (menu/panel are appended as
+   its children — see openReader/readerAskPanelHtml in app.js), so it shares
+   the overlay's z-index:55 stacking context. Local z-index values here only
+   need to out-rank the navbar/viewport siblings within that context — they
+   are NOT part of the app-wide 55/60/70/75/80 stack (DESIGN.md §7). */
+
+.reader-ask-open-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  height: 30px;
+  padding: 0 0.7rem;
+  border-radius: 9999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-container);
+  transition: background 150ms ease, transform 150ms ease;
+}
+.reader-ask-open-btn:hover { background: var(--surface-3); }
+.reader-ask-open-btn:active { transform: scale(.96); }
+
+/* Floating "Explain / Simply / …" chip menu, positioned by JS (readerAskMenuShow)
+   with inline left/top relative to .reader-overlay. */
+.reader-ask-menu {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.3rem;
+  border-radius: 9999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  animation: reader-ask-menu-in 140ms var(--ease-out);
+}
+
+@keyframes reader-ask-menu-in {
+  from { opacity: 0; transform: translateY(4px) scale(.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.reader-ask-chip {
+  white-space: nowrap;
+  padding: 0.32rem 0.65rem;
+  border-radius: 9999px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text);
+  transition: background 120ms ease, color 120ms ease;
+}
+.reader-ask-chip:hover { background: var(--primary-container); color: var(--on-primary-container); }
+
+/* Round 8 item 5: an explicit "deselect" — the menu now tracks the live
+   selection across scroll instead of hiding on it, so there needs to be a
+   deliberate way to dismiss it besides clearing the selection by hand. */
+.reader-ask-menu-dismiss {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: 0.05rem;
+  border-radius: 9999px;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-subtle);
+  transition: background 120ms ease, color 120ms ease;
+}
+.reader-ask-menu-dismiss:hover { background: var(--surface-2); color: var(--text); }
+
+/* Docked ask panel — an absolute child of .reader-viewport (already
+   position:relative), so it docks to the right edge of the reading area
+   without covering the navbar. Slides in from the right; hidden via the
+   `hidden` attribute until first opened, then toggled with a class so the
+   slide transition can play both ways. */
+.reader-ask-panel {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: min(360px, 92vw);
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  transform: translateX(100%);
+  transition: transform 220ms var(--ease-out);
+}
+
+.reader-ask-panel.reader-ask-panel-open {
+  transform: translateX(0);
+}
+
+.reader-ask-panel-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.reader-ask-panel-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.reader-ask-source {
+  flex-shrink: 0;
+  padding: 0.7rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  max-height: 30%;
+  overflow-y: auto;
+}
+
+.reader-ask-source-empty {
+  font-size: 0.78rem;
+  color: var(--text-subtle);
+}
+
+.reader-ask-source-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-subtle);
+  margin-bottom: 0.25rem;
+}
+
+.reader-ask-source-quote {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+  font-style: italic;
+  border-left: 2px solid var(--border-strong);
+  padding-left: 0.55rem;
+}
+
+.reader-ask-source-thumb {
+  display: block;
+  max-width: 100%;
+  max-height: 8rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border);
+  object-fit: contain;
+}
+
+.reader-ask-thread {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.reader-ask-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.reader-ask-bubble {
+  border-radius: 0.9rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.reader-ask-bubble-q {
+  align-self: flex-end;
+  max-width: 92%;
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+  border-bottom-right-radius: 0.25rem;
+}
+
+.reader-ask-mode-badge {
+  display: inline-block;
+  margin-right: 0.4rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 9999px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  background: var(--surface);
+  color: var(--primary);
+}
+
+.reader-ask-bubble-a {
+  align-self: flex-start;
+  max-width: 92%;
+  background: var(--surface-2);
+  color: var(--text);
+  border-bottom-left-radius: 0.25rem;
+}
+
+.reader-ask-bubble-a.reader-ask-error {
+  background: var(--danger-c);
+  color: var(--on-danger-c);
+}
+
+.reader-ask-loading {
+  color: var(--text-subtle);
+  font-style: italic;
+}
+
+/* ---------- shared "rich" AI-answer markdown styles (Build 9 round 6) ----------
+   Applied by renderRichText() (app.js) to whatever element it fills — this
+   reader ask-panel answer bubble, and the canvas AI-conversation overlay's
+   assistant turn bubbles (canvas.css) — defined once here since both share
+   this one class and reader.css loads globally. Deliberately compact (these
+   render inside chat bubbles, not a full document) and theme-token-driven. */
+.ai-rich {
+  white-space: normal; /* overrides the pre-wrap on .reader-ask-bubble/.canvas-ai-turn-bubble — block tags (p/ul/li) manage their own spacing */
+}
+.ai-rich > *:first-child { margin-top: 0; }
+.ai-rich > *:last-child { margin-bottom: 0; }
+.ai-rich p { margin: 0.5em 0; }
+.ai-rich .ai-rich-h1 {
+  margin: 0.7em 0 0.3em;
+  font-size: 1.05em;
+  font-weight: 700;
+  color: var(--text);
+}
+.ai-rich .ai-rich-h3 {
+  margin: 0.6em 0 0.2em;
+  font-size: 1em;
+  font-weight: 600;
+  color: var(--text);
+}
+.ai-rich ul, .ai-rich ol {
+  margin: 0.4em 0;
+  padding-left: 1.3em;
+}
+.ai-rich li { margin: 0.15em 0; }
+.ai-rich li::marker { color: var(--text-subtle); }
+.ai-rich blockquote {
+  margin: 0.5em 0;
+  padding-left: 0.6em;
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-muted);
+  font-style: italic;
+}
+.ai-rich a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ai-rich .ai-rich-code {
+  padding: 0.05em 0.35em;
+  border-radius: 0.35em;
+  background: var(--surface-3);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+.ai-rich .ai-rich-pre {
+  margin: 0.5em 0;
+  padding: 0.55em 0.7em;
+  border-radius: 0.6em;
+  background: var(--surface-3);
+  overflow-x: auto;
+}
+.ai-rich .ai-rich-pre code {
+  background: none;
+  padding: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  color: var(--text);
+  white-space: pre;
+}
+
+/* Single "Pin to canvas" control for the whole conversation (round 6 —
+   replaces the old per-answer button that used to live in canvas.css).
+   Shown/hidden by readerAskUpdatePinControl (app.js). */
+.reader-ask-pin-bar {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  padding: 0.5rem 0.9rem;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.reader-ask-pin-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.9rem;
+  border-radius: 9999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--on-primary-container);
+  background: var(--primary-container);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, transform 120ms ease;
+}
+.reader-ask-pin-btn:hover { background: var(--primary); color: var(--on-primary); }
+.reader-ask-pin-btn:active { transform: scale(.97); }
+.reader-ask-pin-btn:disabled { opacity: .6; cursor: default; transform: none; }
+
+.reader-ask-composer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  padding: 0.7rem 0.9rem;
+  border-top: 1px solid var(--border);
+}
+
+.reader-ask-input {
+  flex: 1 1 auto;
+  resize: none;
+  max-height: 6rem;
+  border-radius: 0.65rem;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+.reader-ask-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.reader-ask-send-btn {
+  flex-shrink: 0;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.82rem;
+}
+
+/* Region-snip marquee (drawn inside the .reader-page it started on). */
+.reader-snip-marquee {
+  position: absolute;
+  border: 1.5px dashed var(--primary);
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  pointer-events: none;
+}
+
+/* Snip mode: the page wrapper itself must receive the pointerdown (so
+   readerSnipPointerDown's e.target.closest('.reader-page') delegation works)
+   instead of the PDF text layer / our annotation canvas / note layer
+   underneath swallowing it — those get pointer-events:none for the duration.
+   Three ancestor classes give this more specificity than pdf_viewer.css's
+   plain `.textLayer` rule, so no !important needed. */
+.reader-overlay.reader-snipping .reader-page > * {
+  pointer-events: none;
+  user-select: none;
+}
+.reader-overlay.reader-snipping .reader-page {
+  cursor: crosshair;
+}
+.reader-overlay.reader-snipping .reader-scroll {
+  cursor: crosshair;
+}

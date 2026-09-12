@@ -26,6 +26,7 @@ from .base import (
     extra_instructions_block,
     quiz_prompt_text,
     repair_prompt_text,
+    parse_data_url,
 )
 
 # Fast, free-tier friendly, reads PDFs and images natively. Configurable via
@@ -462,3 +463,42 @@ class GeminiProvider(AIProvider):
         if not data:
             raise RuntimeError("Gemini returned an empty quiz.")
         return list(data)
+
+    def stream_answer(self, system: str, user: str, image: str | None = None, should_cancel=None):
+        """Stream a study-assistant answer (Phase A of the "ask AI" feature).
+
+        Reuses the same generate_content_stream + should_cancel-between-chunks
+        mechanism as generate_note_latex's streaming path (see _consume_stream
+        above), but yields each chunk's text immediately instead of
+        reassembling the whole response first, so the caller can relay it to
+        the client as it arrives. The system prompt goes through Gemini's
+        native system_instruction config field (unlike the note/quiz/concept
+        prompts, which are inlined into `contents` — those predate this and
+        are left unchanged). An optional image crop is attached as an inline
+        Part built from the decoded data: URL bytes (no File API upload needed
+        for a single small crop).
+        """
+        contents = []
+        if image:
+            mime, b64 = parse_data_url(image)
+            import base64
+            contents.append(types.Part.from_bytes(data=base64.b64decode(b64), mime_type=mime))
+        contents.append(user)
+        cfg = types.GenerateContentConfig(
+            system_instruction=system, temperature=0.4, max_output_tokens=NOTE_MAX_TOKENS,
+        )
+        stream = client().models.generate_content_stream(
+            model=current_model(), contents=contents, config=cfg,
+        )
+        try:
+            for chunk in stream:
+                if should_cancel and should_cancel():
+                    raise AICancelled()
+                text = _chunk_text(chunk)
+                if text:
+                    yield text
+        finally:
+            try:
+                stream.close()
+            except Exception:
+                pass

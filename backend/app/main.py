@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import config, db
 from .auth import require_auth
-from .routers import auth, health, semesters, courses, materials, generation, exams, schedule, settings, quiz, tasks, profile, prompts
+from .routers import auth, health, semesters, courses, materials, generation, exams, schedule, settings, quiz, tasks, profile, prompts, canvas, ai
 
 
 @asynccontextmanager
@@ -53,6 +53,8 @@ app.include_router(quiz.router, prefix="/api", dependencies=_auth_dep)
 app.include_router(tasks.router, prefix="/api", dependencies=_auth_dep)
 app.include_router(profile.router, prefix="/api", dependencies=_auth_dep)
 app.include_router(prompts.router, prefix="/api", dependencies=_auth_dep)
+app.include_router(canvas.router, prefix="/api", dependencies=_auth_dep)
+app.include_router(ai.router, prefix="/api", dependencies=_auth_dep)
 
 # Serve the frontend last so it doesn't shadow /api routes. html=True makes
 # "/" resolve to index.html.

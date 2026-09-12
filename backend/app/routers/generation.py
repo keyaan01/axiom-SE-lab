@@ -126,6 +126,30 @@ def list_concepts(course_id: int):
         conn.close()
 
 
+class ConceptRenameIn(BaseModel):
+    display_name: str
+
+
+@router.patch("/concepts/{concept_id}")
+def rename_concept(concept_id: int, payload: ConceptRenameIn):
+    """Rename a lesson/concept. Updates concepts.name AND the title of any note
+    generated for it (notes.title), so the lesson list, schedule, quizzes and the
+    note card/reader all show one consistent name (Build 9 canvas round 4)."""
+    name = (payload.display_name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name cannot be blank")
+    conn = db.get_connection()
+    try:
+        if not conn.execute("SELECT 1 FROM concepts WHERE id = ?", (concept_id,)).fetchone():
+            raise HTTPException(status_code=404, detail="Concept not found")
+        conn.execute("UPDATE concepts SET name = ? WHERE id = ?", (name, concept_id))
+        conn.execute("UPDATE notes SET title = ? WHERE concept_id = ?", (name, concept_id))
+        conn.commit()
+        return {"id": concept_id, "name": name, "display_name": name}
+    finally:
+        conn.close()
+
+
 # ---------- note PDF generation (step 4/5) ----------
 
 @router.post("/courses/{course_id}/notes/generate", status_code=202)

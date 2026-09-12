@@ -36,6 +36,12 @@ def avatar_dir() -> Path:
     return config.AVATARS_DIR
 
 
+def concept_canvas_dir(concept_id: int) -> Path:
+    d = config.CANVAS_DIR / str(concept_id)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def remove_course_files(course_id: int) -> None:
     """Best-effort removal of a course's on-disk files (uploads/notes/thumbs).
 

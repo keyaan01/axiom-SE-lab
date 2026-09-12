@@ -26,6 +26,7 @@ NOTES_DIR = DATA_DIR / "notes"       # compiled note PDFs, per course
 THUMBS_DIR = DATA_DIR / "thumbs"     # page-1 preview PNGs, per course
 WORK_DIR = DATA_DIR / "work"         # transient LaTeX build dirs
 AVATARS_DIR = DATA_DIR / "avatars"   # user profile avatar images (Build 5, Step 5)
+CANVAS_DIR = DATA_DIR / "canvas"     # dropped canvas files (images/pdf/docx/pptx), per concept
 
 # Secrets / external tools.
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
@@ -33,6 +34,9 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 # code. Free-tier quota is per-model, so switching models gives a fresh bucket.
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash").strip() or "gemini-3.5-flash"
 TECTONIC_PATH = os.environ.get("TECTONIC_PATH", "tectonic").strip() or "tectonic"
+# LibreOffice (soffice), used to convert dropped docx/pptx canvas files to PDF.
+# External binary like Tectonic — not a pip dependency; install separately.
+SOFFICE_PATH = os.environ.get("LIBREOFFICE_PATH", "soffice").strip() or "soffice"
 
 # Optional env fallbacks for the other AI providers (Phase A2). Each is used
 # only if no runtime override is stored in the settings table (see
@@ -47,5 +51,5 @@ OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "").strip()
 
 def ensure_dirs() -> None:
     """Create the data directory tree if it does not exist yet."""
-    for d in (DATA_DIR, UPLOADS_DIR, NOTES_DIR, THUMBS_DIR, WORK_DIR, AVATARS_DIR):
+    for d in (DATA_DIR, UPLOADS_DIR, NOTES_DIR, THUMBS_DIR, WORK_DIR, AVATARS_DIR, CANVAS_DIR):
         d.mkdir(parents=True, exist_ok=True)

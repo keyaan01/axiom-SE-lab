@@ -32,6 +32,8 @@ from .base import (
     enhancement_catalog,
     enhancement_instructions,
     valid_enhancement_keys,
+    ASK_MODES,
+    build_ask_messages,
 )
 from . import gemini_provider
 from .gemini_provider import GeminiProvider, AVAILABLE_MODELS
@@ -200,6 +202,10 @@ def generate_quiz(name, summary, materials, pyqs, sibling_names=None, should_can
     return provider().generate_quiz(
         name, summary, materials, pyqs, sibling_names=sibling_names, should_cancel=should_cancel,
     )
+
+
+def stream_answer(system, user, image=None, should_cancel=None):
+    return provider().stream_answer(system, user, image=image, should_cancel=should_cancel)
 
 
 def current_api_key() -> str:

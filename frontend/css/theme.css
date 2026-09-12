@@ -376,10 +376,15 @@ select.field-input { cursor: pointer; }
    see riseDelayStyle() in app.js). */
 .rise-in { animation: rise var(--dur-slow) var(--ease-out) both; }
 
-/* ---------- 5. Auth screen: monogram, pill CTA, cursor-reactive background ----------
+/* ---------- 5. Auth screen ----------
    Source of truth: DESIGN.md §8 (auth) + §4 (motion) + §9 (reduced motion).
-   The animated background is AUTH-ONLY: mounted by showAuthGate()/mountAuthBg()
-   into #auth-bg-slot and torn down by enterApp() — it never appears in the app. */
+   MAJOR redesign (Build 9 round 8 item 7): a split hero|form layout, an
+   upgraded aurora/gradient-mesh background, animated mode transitions with
+   staggered fields, floating labels, a password-strength meter, and a
+   success micro-animation. The animated background + hero panel are
+   AUTH-ONLY: mounted by showAuthGate()/mountAuthBg()/mountAuthHero() into
+   #auth-bg-slot / #auth-hero-slot and torn down by enterApp() — neither ever
+   appears in the app. All colors below are tokens, so light/dark both work. */
 .auth-monogram {
   display: flex;
   align-items: center;
@@ -398,6 +403,7 @@ select.field-input { cursor: pointer; }
    auth CTA + FAB-like actions" — everything else on .btn stays --r-md). */
 .btn-pill { border-radius: var(--r-pill); }
 
+/* ---- 5a. Animated background (aurora / gradient-mesh) ---- */
 .auth-bg {
   position: fixed; /* pin to the viewport so the animated background stays behind
      the card at every scroll position — no un-animated gap appears when a tall
@@ -415,9 +421,29 @@ select.field-input { cursor: pointer; }
     radial-gradient(90% 80% at 0% 110%, var(--peach-c) 0%, transparent 55%),
     var(--surface-2);
 }
+/* A slow-rotating conic sheen adds mesh-gradient depth behind the blobs. */
+.auth-bg::before {
+  content: '';
+  position: absolute;
+  inset: -25%;
+  background: conic-gradient(from 0deg at 50% 50%, var(--lilac-c), var(--sky-c), var(--peach-c), var(--mint-c), var(--lilac-c));
+  filter: blur(70px);
+  opacity: .22;
+  animation: authAuroraSpin 46s linear infinite;
+}
+:root.dark .auth-bg::before { opacity: .15; }
+/* A soft vignette focuses the eye toward the centered card. */
+.auth-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(120% 100% at 50% 45%, transparent 55%, rgba(20,16,25,.10) 100%);
+}
+:root.dark .auth-bg::after { background: radial-gradient(120% 100% at 50% 45%, transparent 45%, rgba(0,0,0,.40) 100%); }
+@keyframes authAuroraSpin { to { transform: rotate(360deg); } }
 
 /* prefers-reduced-motion (or a no-JS/no-RAF) fallback: one static soft
-   gradient — no blobs, no animation, no mouse tracking. */
+   gradient — no blobs, no aurora sheen, no animation, no mouse tracking. */
 .auth-bg-static {
   background:
     radial-gradient(50% 45% at 15% 15%, var(--primary-container) 0%, transparent 70%),
@@ -426,6 +452,7 @@ select.field-input { cursor: pointer; }
     radial-gradient(45% 40% at 10% 85%, var(--lilac-c) 0%, transparent 70%);
   opacity: .8;
 }
+.auth-bg-static::before, .auth-bg-static::after { display: none; }
 
 /* Each blob lives in its own full-bleed wrapper so the JS-driven pointer-lean
    transform (on the wrapper) and the CSS idle-float keyframe (on the blob
@@ -461,6 +488,270 @@ select.field-input { cursor: pointer; }
   50%  { transform: translate3d(3%, -4%, 0) scale(1.08); }
   100% { transform: translate3d(-4%, 3%, 0) scale(0.94); }
 }
+
+/* ---- 5b. Split shell: hero (left) | form panel (right); stacks narrow ---- */
+.auth-shell {
+  width: 100%;
+  max-width: 1060px;
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  align-items: center;
+  gap: 3.5rem;
+}
+@media (max-width: 880px) {
+  .auth-shell { grid-template-columns: 1fr; gap: 1.5rem; max-width: 26rem; }
+}
+
+.auth-hero { min-width: 0; }
+.auth-hero-inner { position: relative; padding: .5rem 0; }
+.auth-hero-brand { display: flex; align-items: center; gap: .75rem; margin-bottom: 1.75rem; }
+.auth-wordmark { font-size: 1.375rem; font-weight: 800; letter-spacing: -.02em; color: var(--text); }
+.auth-monogram-lg {
+  width: 2.75rem;
+  height: 2.75rem;
+  font-size: 1.2rem;
+  border-radius: var(--r-lg);
+  animation: authMonogramPop .6s var(--ease-spring) both;
+}
+@keyframes authMonogramPop {
+  from { opacity: 0; transform: scale(.4) rotate(-10deg); }
+  to   { opacity: 1; transform: scale(1) rotate(0); }
+}
+.auth-hero-title {
+  font-size: clamp(1.65rem, 1.2rem + 2vw, 2.5rem);
+  font-weight: 800;
+  letter-spacing: -.02em;
+  line-height: 1.16;
+  color: var(--text);
+  margin: 0 0 1rem;
+}
+.auth-tagline {
+  min-height: 2.7em;
+  max-width: 30rem;
+  font-size: 1.02rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+  overflow: hidden;
+}
+.auth-tagline-text { display: block; animation: authTaglineIn .45s var(--ease-out); }
+.auth-tagline-text.auth-tagline-exit { animation: authTaglineOut .26s var(--ease-spring) forwards; }
+@keyframes authTaglineIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes authTaglineOut { to { opacity: 0; transform: translateY(-10px); } }
+
+.auth-hero-motifs { position: relative; height: 0; margin-top: 2.75rem; }
+.auth-motif {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  padding: .5rem .85rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-md);
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  animation: authMotifFloat 8s ease-in-out infinite;
+}
+.auth-motif-1 { top: -1.75rem; left: 0;      animation-duration: 7.5s; }
+.auth-motif-2 { top: 1.75rem;  left: 8rem;   animation-duration: 8.5s; animation-delay: -2.4s; }
+.auth-motif-3 { top: 6.5rem;   left: 1.5rem; animation-duration: 9.5s; animation-delay: -5.1s; }
+@keyframes authMotifFloat {
+  0%, 100% { transform: translate3d(0,0,0) rotate(0deg); }
+  50%      { transform: translate3d(0,-10px,0) rotate(-1.1deg); }
+}
+
+@media (max-width: 880px) {
+  .auth-hero-motifs { display: none; }
+  .auth-hero-inner { text-align: center; }
+  .auth-hero-brand { justify-content: center; margin-bottom: 1rem; }
+  .auth-tagline { margin: 0 auto; }
+}
+
+.auth-panel { display: flex; justify-content: center; width: 100%; }
+
+/* ---- 5c. Card + animated mode transitions ----
+   #auth-card-slot must NOT clip at rest: the slot is a plain square box while
+   .auth-card has rounded corners + a box-shadow, so a resting overflow:hidden
+   clips the shadow at the two bottom corners where card-radius meets
+   slot-square — visible as dark "blob" artifacts poking out below the card
+   (Build 9 round 8 bug). Clipping is only needed WHILE a mode-switch height
+   morph is in flight (so the incoming/outgoing card doesn't spill past the
+   animating height) — toggled by renderAuthScreen() via .auth-card-slot-
+   animating, added right before the morph and removed the instant it ends. */
+/* The shadow + rounding live on the SLOT (not the card), and the slot always
+   clips (overflow:hidden) to its rounded box. A box-shadow paints OUTSIDE the
+   border-box and is never clipped by the element's own overflow, so the slot's
+   shadow shows fully at rest AND grows/shrinks smoothly with the height morph
+   during a mode switch — no sudden "pop" when the animation ends. The slot
+   being rounded means the clip matches the card, so no bottom-corner "blob"
+   artifacts either (the earlier square-slot + card-shadow combo caused those). */
+#auth-card-slot { width: 100%; max-width: 26rem; border-radius: var(--r-xl); box-shadow: var(--shadow-lg); overflow: hidden; background: var(--surface); }
+/* Deterministic exit: applied directly to the outgoing .auth-card by
+   renderAuthScreen(), which waits for this animation's `animationend` (not a
+   blind timeout) before swapping content. */
+.auth-card.auth-card-leaving { animation: authCardOut .16s var(--ease-out) forwards; }
+@keyframes authCardOut { to { opacity: 0; transform: translateY(-8px) scale(.98); } }
+
+.auth-card {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  /* box-shadow now lives on #auth-card-slot (so it isn't clipped by the
+     mode-switch overflow and never "pops" in) — see the slot rule above. */
+  padding: 1.75rem;
+  animation: authCardIn .38s var(--ease-out);
+}
+@keyframes authCardIn {
+  from { opacity: 0; transform: translateY(14px) scale(.985); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.auth-card-head { margin-bottom: 1.35rem; text-align: center; }
+.auth-card-heading { font-size: 1.25rem; font-weight: 700; letter-spacing: -.01em; color: var(--text); }
+.auth-card-sub { margin-top: .3rem; font-size: .875rem; color: var(--text-muted); }
+.auth-card-foot { margin-top: 1.35rem; }
+
+#auth-form { display: flex; flex-direction: column; gap: 1.1rem; }
+#auth-form > .auth-anim-row { animation: authFieldIn .42s var(--ease-out) both; }
+#auth-form > .auth-anim-row:nth-child(1) { animation-delay: .05s; }
+#auth-form > .auth-anim-row:nth-child(2) { animation-delay: .09s; }
+#auth-form > .auth-anim-row:nth-child(3) { animation-delay: .13s; }
+#auth-form > .auth-anim-row:nth-child(4) { animation-delay: .17s; }
+#auth-form > .auth-anim-row:nth-child(5) { animation-delay: .21s; }
+#auth-form > .auth-anim-row:nth-child(6) { animation-delay: .25s; }
+#auth-form > .auth-anim-row:nth-child(7) { animation-delay: .29s; }
+#auth-form > .auth-anim-row:nth-child(8) { animation-delay: .33s; }
+#auth-form > .auth-anim-row:nth-child(9) { animation-delay: .37s; }
+#auth-form > .auth-anim-row:nth-child(n+10) { animation-delay: .40s; }
+@keyframes authFieldIn { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
+
+.auth-secq-display-label { display: block; font-size: .8rem; font-weight: 600; color: var(--text-muted); margin-bottom: .35rem; }
+.auth-secq-display-value { padding: .65rem .85rem; background: var(--surface-2); border-radius: var(--r-md); font-size: .875rem; color: var(--text); }
+
+/* ---- 5d. Floating-label fields ---- */
+.auth-field-control { position: relative; }
+.auth-input {
+  display: block;
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 1.05rem .9rem .45rem;
+  font-size: .9rem;
+  color: var(--text);
+  transition: border-color var(--dur) var(--ease-spring), box-shadow var(--dur) var(--ease-spring), background-color var(--dur) var(--ease-spring);
+}
+select.auth-input { cursor: pointer; }
+.auth-field--password .auth-input { padding-right: 2.6rem; }
+.auth-input::placeholder { color: transparent; }
+.auth-input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
+.auth-input:disabled { opacity: .6; pointer-events: none; }
+
+.auth-label {
+  position: absolute;
+  left: .85rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: .875rem;
+  color: var(--text-subtle);
+  pointer-events: none;
+  transform-origin: left center;
+  transition: transform var(--dur) var(--ease-spring), color var(--dur) var(--ease-spring), top var(--dur) var(--ease-spring);
+}
+.auth-input:focus ~ .auth-label,
+.auth-input:not(:placeholder-shown) ~ .auth-label {
+  top: .68rem;
+  transform: translateY(-50%) scale(.78);
+  color: var(--primary);
+  font-weight: 600;
+}
+/* A <select> always shows a chosen value (no empty/placeholder state), so its
+   label stays permanently floated — same visual language, always "filled". */
+.auth-field--select .auth-label { top: .68rem; transform: translateY(-50%) scale(.78); color: var(--text-muted); font-weight: 600; }
+.auth-field--select .auth-input:focus ~ .auth-label { color: var(--primary); }
+
+.auth-hint { display: block; margin-top: .3rem; font-size: .72rem; color: var(--text-subtle); }
+
+.auth-toggle-btn {
+  position: absolute;
+  right: .5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: var(--r-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-subtle);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease-spring), background-color var(--dur) var(--ease-spring);
+}
+.auth-toggle-btn:hover { background: var(--surface-2); color: var(--text); }
+.auth-toggle-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
+
+/* ---- 5e. Password strength meter (visual only — never gates submission) ---- */
+.auth-strength { margin-top: -.55rem; }
+.auth-strength-track { height: 4px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+.auth-strength-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: var(--danger);
+  transition: width .32s var(--ease-spring), background-color .32s var(--ease-spring);
+}
+.auth-strength-label { display: block; margin-top: .3rem; font-size: .7rem; font-weight: 600; color: var(--text-subtle); }
+.auth-strength[data-score="1"] .auth-strength-fill { width: 25%;  background: var(--danger); }
+.auth-strength[data-score="2"] .auth-strength-fill { width: 50%;  background: var(--warning); }
+.auth-strength[data-score="3"] .auth-strength-fill { width: 75%;  background: var(--sky); }
+.auth-strength[data-score="4"] .auth-strength-fill { width: 100%; background: var(--success); }
+
+/* ---- 5f. Inline error reveal (slide + fade; aria-live="assertive" in markup) ---- */
+.auth-error {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transform: translateY(-4px);
+  transition: max-height .3s var(--ease-spring), opacity .25s ease, transform .3s var(--ease-spring);
+}
+.auth-error.show { max-height: 90px; opacity: 1; transform: translateY(0); }
+
+/* ---- 5g. Submit CTA: press scale (via .btn) + loading-spinner morph ---- */
+.auth-submit-btn { position: relative; margin-top: .25rem; }
+.auth-spinner {
+  display: none;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--on-primary) 35%, transparent);
+  border-top-color: var(--on-primary);
+  animation: authSpin .7s linear infinite;
+}
+.auth-submit-btn.is-busy .auth-spinner { display: inline-block; }
+@keyframes authSpin { to { transform: rotate(360deg); } }
+
+/* ---- 5h. Success micro-animation (replaces the card content briefly) ---- */
+.auth-success {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: .9rem;
+  padding: 2.5rem 1rem;
+  text-align: center;
+  animation: authFieldIn .3s var(--ease-out);
+}
+.auth-success-icon { color: var(--success); }
+.auth-success-msg { font-size: 1.05rem; font-weight: 700; color: var(--text); }
+.auth-success-ring, .auth-success-tick { stroke-dasharray: 100; stroke-dashoffset: 100; }
+.auth-success-ring { animation: authSuccessDraw .5s var(--ease-out) forwards; }
+.auth-success-tick { animation: authSuccessDraw .4s var(--ease-out) .42s forwards; }
+@keyframes authSuccessDraw { to { stroke-dashoffset: 0; } }
 
 /* ---------- 6. Reduced motion ---------- */
 @media (prefers-reduced-motion: reduce) {

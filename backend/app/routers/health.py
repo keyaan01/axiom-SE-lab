@@ -9,7 +9,7 @@ import shutil
 import subprocess
 from fastapi import APIRouter
 from .. import config, db
-from ..services import ai
+from ..services import ai, office
 
 router = APIRouter()
 
@@ -58,10 +58,16 @@ def _check_ai() -> dict:
     return {"ok": False, "detail": f"No API key set for {label} (add one in Settings)"}
 
 
+def _check_office() -> dict:
+    ok, detail = office.office_available()
+    return {"ok": ok, "detail": detail}
+
+
 @router.get("/health")
 def health() -> dict:
     return {
         "db": _check_db(),
         "tectonic": _check_tectonic(),
         "ai_key": _check_ai(),
+        "office": _check_office(),
     }

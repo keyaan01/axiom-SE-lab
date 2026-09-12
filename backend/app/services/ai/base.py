@@ -320,6 +320,62 @@ def quiz_prompt_text(name: str, summary: str, siblings: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Ask/explain (Phase A of the in-reader "highlight/snip -> ask AI" study
+# assistant). Provider-agnostic: ASK_MODES supplies a canned instruction per
+# quick-action mode, build_ask_messages assembles the (system, user) prompt
+# pair every adapter's stream_answer() turns into its own SDK message shape.
+# ---------------------------------------------------------------------------
+
+ASK_MODES: dict[str, str] = {
+    "explain": "Explain the following clearly and concisely.",
+    "simple": "Explain the following as simply as possible, like you would to a beginner (ELI5).",
+    "deep": "Explain the following in depth, covering the underlying mechanism and why it matters.",
+    "analogy": "Explain the following using a concrete, everyday analogy.",
+    "define": "Define the key term(s) in the following precisely and briefly.",
+}
+
+
+def build_ask_messages(concept_name: str, concept_summary: str, instruction: str,
+                        selection: str = "", context: str = "", has_image: bool = False) -> tuple[str, str]:
+    """Assemble the (system, user) prompt pair for the in-reader "ask AI"
+    study assistant: a student has highlighted/snipped a passage or figure
+    from their lesson and wants it explained/defined/etc.
+
+    system is a study-tutor prompt scoped to the lesson; user is the actual
+    request (instruction + optional selection/image note/context/summary),
+    assembled plainly with clear labels so every adapter can turn it into its
+    own message shape unchanged.
+    """
+    system = (
+        "You are a helpful study tutor. A student is asking about a specific passage or "
+        f"figure from their lesson named \"{concept_name}\". You may use general knowledge "
+        "and analogies to help explain, but stay relevant to that passage and to the lesson "
+        "at hand — don't wander into unrelated territory. Any math MUST be written in LaTeX "
+        "math mode ($...$ for inline, $$...$$ for display) so it renders correctly with "
+        "KaTeX. Keep your answer focused and not overly long."
+    )
+    lines = [instruction]
+    if (selection or "").strip():
+        lines.append("")
+        lines.append("Passage:")
+        lines.append(selection.strip())
+    if has_image:
+        lines.append("")
+        lines.append(
+            "An image of the region is attached — look at it and explain what it shows."
+        )
+    if (context or "").strip():
+        lines.append("")
+        lines.append("Nearby context from the lesson:")
+        lines.append(context.strip())
+    if (concept_summary or "").strip():
+        lines.append("")
+        lines.append(f"Lesson summary: {concept_summary.strip()}")
+    user = "\n".join(lines)
+    return system, user
+
+
+# ---------------------------------------------------------------------------
 # NOTE_ENHANCEMENTS catalog (moved verbatim from services/gemini.py).
 # ---------------------------------------------------------------------------
 
@@ -393,6 +449,19 @@ class AIProvider(ABC):
         """Generate a quiz (concept + PYQ style questions) for one concept."""
         raise NotImplementedError
 
+    @abstractmethod
+    def stream_answer(self, system: str, user: str, image: str | None = None, should_cancel=None):
+        """Stream a study-assistant answer to a highlight/snip "ask AI" question.
+
+        system/user are the prompt pair from build_ask_messages(). image, when
+        given, is a base64 data: URL string (e.g. "data:image/png;base64,...")
+        for a single optional screenshot crop. Yields answer text chunks as
+        they arrive (a generator); should_cancel, if given, is a zero-arg
+        callable checked between chunks — raise AICancelled to stop early
+        (mirrors the note-generation streaming path's cancellation).
+        """
+        raise NotImplementedError
+
 
 # ---------------------------------------------------------------------------
 # File / JSON helpers for future adapters (not needed by Gemini today, since
@@ -419,6 +488,24 @@ def data_url(data: bytes, mime: str) -> str:
     import base64
     b64 = base64.b64encode(data).decode("ascii")
     return f"data:{mime};base64,{b64}"
+
+
+def parse_data_url(url: str) -> tuple[str, str]:
+    """Split a base64 data: URL ("data:image/png;base64,....") into
+    (mime, base64_str) — the inverse of data_url(), minus the decode step
+    (callers that need raw bytes, e.g. Gemini's Part.from_bytes, base64-decode
+    the returned string themselves; callers that want a base64 string, e.g.
+    Anthropic's image source block, use it directly).
+
+    Raises ValueError if `url` isn't a well-formed data: URL.
+    """
+    if not url or not url.startswith("data:") or "," not in url:
+        raise ValueError("Not a valid data: URL")
+    header, b64 = url.split(",", 1)
+    if not b64:
+        raise ValueError("Malformed data: URL (empty payload)")
+    mime = header[5:].split(";")[0] or "application/octet-stream"
+    return mime, b64
 
 
 def pdf_to_text(disk_path) -> str:

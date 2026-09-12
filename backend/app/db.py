@@ -171,6 +171,33 @@ CREATE TABLE IF NOT EXISTS saved_prompts (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS canvas_files (
+  id              INTEGER PRIMARY KEY,
+  concept_id      INTEGER NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL,
+  display_name    TEXT NOT NULL,
+  disk_uuid       TEXT NOT NULL,
+  pdf_disk_uuid   TEXT,
+  thumb_disk_uuid TEXT,
+  mime_type       TEXT,
+  size_bytes      INTEGER,
+  status          TEXT NOT NULL DEFAULT 'ready',
+  error_message   TEXT,
+  created_at      TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS canvas_layout (
+  concept_id  INTEGER PRIMARY KEY REFERENCES concepts(id) ON DELETE CASCADE,
+  data_json   TEXT NOT NULL,
+  updated_at  TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS canvas_file_annotations (
+  canvas_file_id INTEGER PRIMARY KEY REFERENCES canvas_files(id) ON DELETE CASCADE,
+  data_json      TEXT NOT NULL,
+  updated_at     TEXT DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_courses_semester ON courses(semester_id);
 CREATE INDEX IF NOT EXISTS idx_materials_course ON materials(course_id);
 CREATE INDEX IF NOT EXISTS idx_concepts_course ON concepts(course_id);
@@ -182,6 +209,7 @@ CREATE INDEX IF NOT EXISTS idx_schedule_sem_date ON schedule_items(semester_id, 
 CREATE INDEX IF NOT EXISTS idx_schedule_course ON schedule_items(course_id);
 CREATE INDEX IF NOT EXISTS idx_quizzes_concept ON quizzes(concept_id);
 CREATE INDEX IF NOT EXISTS idx_lesson_progress_concept ON lesson_progress(concept_id);
+CREATE INDEX IF NOT EXISTS idx_canvas_files_concept ON canvas_files(concept_id);
 """
 
 

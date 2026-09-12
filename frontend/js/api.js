@@ -49,4 +49,54 @@ const api = {
     }
     return res.json();
   },
+
+  // POST a JSON body and read the response as a text/plain STREAM (used by
+  // the reader's "Ask AI" feature — POST /concepts/:id/ask streams the answer
+  // in as it's generated instead of waiting for the full response). Calls
+  // onChunk(delta) for every chunk decoded off the wire (the caller
+  // accumulates — this passes the incremental delta, not the running total)
+  // and resolves with the full accumulated text once the stream ends. `signal`
+  // (an AbortController's signal) lets the caller cancel an in-flight ask.
+  async stream(path, body, onChunk, { signal } = {}) {
+    const res = await fetch(`/api${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+      credentials: 'same-origin',
+      signal,
+    });
+    if (!res.ok) {
+      if (res.status === 401) window.dispatchEvent(new CustomEvent('axiom:unauthorized'));
+      let msg = `POST ${path} failed (${res.status})`;
+      try {
+        const j = await res.json();
+        if (j && j.detail) {
+          msg = typeof j.detail === 'string'
+            ? j.detail
+            : (Array.isArray(j.detail) && j.detail[0] && j.detail[0].msg) || JSON.stringify(j.detail);
+        }
+      } catch (_) { /* non-JSON error body */ }
+      throw new Error(msg);
+    }
+    // Fallback for an environment without a readable-stream body reader —
+    // just resolve with the whole text in one "chunk".
+    if (!res.body || typeof res.body.getReader !== 'function') {
+      const text = await res.text();
+      if (typeof onChunk === 'function' && text) onChunk(text);
+      return text;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let full = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      if (!chunk) continue;
+      full += chunk;
+      if (typeof onChunk === 'function') onChunk(chunk);
+    }
+    full += decoder.decode(); // flush any bytes buffered for a multi-byte char split across chunks
+    return full;
+  },
 };
