@@ -99,6 +99,25 @@ def generate_quiz(concept_id: int, regenerate: bool = False):
     return {"status": "generating"}
 
 
+@router.post("/concepts/{concept_id}/quiz/cancel")
+def cancel_quiz(concept_id: int):
+    """Cancel an in-progress quiz generation. Flips the row out of 'generating'
+    (→ 'failed' + 'Cancelled.'); run_quiz_job's should_cancel check sees the
+    status change and aborts at its next checkpoint (best-effort — an already
+    in-flight single AI call can't be force-killed, same as note generation)."""
+    conn = db.get_connection()
+    try:
+        cur = conn.execute(
+            "UPDATE quizzes SET status = 'failed', error_message = 'Cancelled.', "
+            "updated_at = datetime('now') WHERE concept_id = ? AND status = 'generating'",
+            (concept_id,),
+        )
+        conn.commit()
+        return {"ok": True, "cancelled": cur.rowcount > 0}
+    finally:
+        conn.close()
+
+
 @router.post("/concepts/{concept_id}/quiz/result")
 def submit_quiz_result(concept_id: int, payload: QuizResult):
     conn = db.get_connection()
@@ -125,8 +144,29 @@ def submit_quiz_result(concept_id: int, payload: QuizResult):
                 "updated_at = datetime('now') WHERE concept_id = ?",
                 (best_score, best_total, concept_id),
             )
+        # Record every attempt (not just the best-of kept on lesson_progress) —
+        # feeds the scheduler's weak-concept reordering (services/scheduler.py).
+        conn.execute(
+            "INSERT INTO quiz_attempts (course_id, concept_id, score, total) VALUES (?, ?, ?, ?)",
+            (concept["course_id"], concept_id, payload.score, payload.total),
+        )
         conn.commit()
         return dict(_get_progress(conn, concept_id))
+    finally:
+        conn.close()
+
+
+@router.get("/concepts/{concept_id}/attempts")
+def list_quiz_attempts(concept_id: int):
+    conn = db.get_connection()
+    try:
+        _require_concept(conn, concept_id)
+        rows = conn.execute(
+            "SELECT score, total, created_at FROM quiz_attempts "
+            "WHERE concept_id = ? ORDER BY created_at DESC, id DESC LIMIT 20",
+            (concept_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
     finally:
         conn.close()
 

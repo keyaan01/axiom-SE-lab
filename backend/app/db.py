@@ -40,6 +40,9 @@ CREATE TABLE IF NOT EXISTS materials (
   gemini_file_name TEXT,
   gemini_expiry TEXT,
   analyzed INTEGER NOT NULL DEFAULT 0,
+  pdf_disk_uuid TEXT,
+  status TEXT,
+  error_message TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -115,6 +118,27 @@ CREATE TABLE IF NOT EXISTS schedule_items (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Manual lesson moves (drag-to-a-different-day on the dashboard). Keyed by the
+-- stable (exam_id, concept_id) pair -- NOT schedule_items.id, which is
+-- ephemeral (schedule.py._replace_schedule deletes+reinserts the whole
+-- semester's schedule_items on every regenerate, so a raw row id never
+-- survives a regenerate). The scheduler (services/scheduler.build_schedule)
+-- reads this table and pins the concept's placement to study_date instead of
+-- its normal outward-search placement, so a move persists through automatic
+-- regeneration. FK cascades clean up an override when its exam/concept/
+-- semester is deleted. Additive; no _ADDED_COLUMNS entry needed (brand-new
+-- table).
+CREATE TABLE IF NOT EXISTS schedule_overrides (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER NOT NULL,
+  semester_id INTEGER NOT NULL REFERENCES semesters(id) ON DELETE CASCADE,
+  exam_id     INTEGER NOT NULL REFERENCES exams(id)      ON DELETE CASCADE,
+  concept_id  INTEGER NOT NULL REFERENCES concepts(id)   ON DELETE CASCADE,
+  study_date  TEXT NOT NULL,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(exam_id, concept_id)
+);
+
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT
@@ -140,6 +164,19 @@ CREATE TABLE IF NOT EXISTS lesson_progress (
   best_score INTEGER,
   best_total INTEGER,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Every quiz submission (not just the best score kept on lesson_progress) —
+-- feeds the deterministic "weak concept" reordering in services/scheduler.py
+-- (a concept with a recent below-threshold best score is scheduled earlier).
+-- Additive; no _ADDED_COLUMNS entry needed (brand-new table).
+CREATE TABLE IF NOT EXISTS quiz_attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  concept_id INTEGER NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+  score INTEGER NOT NULL,
+  total INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS note_annotations (
@@ -198,6 +235,103 @@ CREATE TABLE IF NOT EXISTS canvas_file_annotations (
   updated_at     TEXT DEFAULT (datetime('now'))
 );
 
+-- Build 12 ("Question Analysis"), Phase 1: a per-course AI analysis of the
+-- course's past exam questions (materials.kind='pyq') — question-type mix,
+-- recurring patterns, and a topic importance ranking. One row per course
+-- (run on demand, cached, stale-aware via pyq_sig — see
+-- services/analysis_service.pyq_signature). Additive; no _ADDED_COLUMNS
+-- needed.
+CREATE TABLE IF NOT EXISTS question_analysis (
+  course_id INTEGER PRIMARY KEY REFERENCES courses(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','generating','ready','failed')),
+  data_json TEXT,
+  pyq_sig TEXT,
+  error_message TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Build 12 ("Question Analysis"), Phase 3: a per-exam revision PDF —
+-- sections ordered most->least important topic (from the course's
+-- question_analysis), teaching from study materials + a practice block
+-- mixing real cited PYQs and fresh practice questions. One row per exam
+-- (UNIQUE exam_id: at most one revision per exam); built on demand + cached +
+-- stale-aware via source_sig (see services/revision_service.revision_source_sig).
+-- Additive; no _ADDED_COLUMNS needed.
+CREATE TABLE IF NOT EXISTS revisions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  exam_id INTEGER NOT NULL UNIQUE REFERENCES exams(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','generating','compiled','failed')),
+  latex_source TEXT,
+  pdf_disk_uuid TEXT,
+  thumb_disk_uuid TEXT,
+  error_message TEXT,
+  source_sig TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_revisions_course ON revisions(course_id);
+
+-- Build 10 ("Constellation" curriculum mind map): AI-discovered relationships
+-- between concepts across the whole curriculum (all of a user's courses, all
+-- semesters, archived included), plus a small status row tracking the
+-- background discovery job. Additive; no _ADDED_COLUMNS entries needed.
+CREATE TABLE IF NOT EXISTS concept_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    a_concept_id INTEGER NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+    b_concept_id INTEGER NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+    label TEXT NOT NULL DEFAULT '',
+    strength REAL NOT NULL DEFAULT 0.5,
+    manual INTEGER NOT NULL DEFAULT 0,
+    hidden INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_concept_links_user ON concept_links(user_id);
+
+CREATE TABLE IF NOT EXISTS mindmap_meta (
+    user_id INTEGER PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'idle' CHECK (status IN ('idle','running','done','failed')),
+    message TEXT,
+    concept_sig TEXT,
+    updated_at TEXT
+);
+
+-- Per-revision infinite canvas + revision-scoped ask (additive; mirrors the
+-- per-concept canvas_files/canvas_layout/canvas_file_annotations tables
+-- above, but scoped to a revisions(id) row instead of a concepts(id) row so
+-- students can drop files/whiteboard directly onto a revision PDF's own
+-- study space. FK CASCADE off revisions(id) — deleting a revision (or its
+-- exam, which cascades to the revision) cleans these rows automatically. No
+-- _ADDED_COLUMNS entries needed (brand-new tables).
+CREATE TABLE IF NOT EXISTS revision_canvas_files (
+  id              INTEGER PRIMARY KEY,
+  revision_id     INTEGER NOT NULL REFERENCES revisions(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL,
+  display_name    TEXT NOT NULL,
+  disk_uuid       TEXT NOT NULL,
+  pdf_disk_uuid   TEXT,
+  thumb_disk_uuid TEXT,
+  mime_type       TEXT,
+  size_bytes      INTEGER,
+  status          TEXT NOT NULL DEFAULT 'ready',
+  error_message   TEXT,
+  created_at      TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS revision_canvas_layout (
+  revision_id INTEGER PRIMARY KEY REFERENCES revisions(id) ON DELETE CASCADE,
+  data_json   TEXT NOT NULL,
+  updated_at  TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS revision_canvas_file_annotations (
+  revision_canvas_file_id INTEGER PRIMARY KEY REFERENCES revision_canvas_files(id) ON DELETE CASCADE,
+  data_json                TEXT NOT NULL,
+  updated_at               TEXT DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_courses_semester ON courses(semester_id);
 CREATE INDEX IF NOT EXISTS idx_materials_course ON materials(course_id);
 CREATE INDEX IF NOT EXISTS idx_concepts_course ON concepts(course_id);
@@ -207,9 +341,12 @@ CREATE INDEX IF NOT EXISTS idx_jobs_course ON jobs(course_id);
 CREATE INDEX IF NOT EXISTS idx_exams_course ON exams(course_id);
 CREATE INDEX IF NOT EXISTS idx_schedule_sem_date ON schedule_items(semester_id, study_date);
 CREATE INDEX IF NOT EXISTS idx_schedule_course ON schedule_items(course_id);
+CREATE INDEX IF NOT EXISTS idx_sched_override_sem ON schedule_overrides(semester_id);
 CREATE INDEX IF NOT EXISTS idx_quizzes_concept ON quizzes(concept_id);
 CREATE INDEX IF NOT EXISTS idx_lesson_progress_concept ON lesson_progress(concept_id);
 CREATE INDEX IF NOT EXISTS idx_canvas_files_concept ON canvas_files(concept_id);
+CREATE INDEX IF NOT EXISTS idx_quiz_attempts_concept ON quiz_attempts(concept_id);
+CREATE INDEX IF NOT EXISTS idx_revision_canvas_files_revision ON revision_canvas_files(revision_id);
 """
 
 
@@ -229,6 +366,11 @@ _ADDED_COLUMNS = [
     ("sessions", "user_id", "INTEGER"),
     ("semesters", "user_id", "INTEGER"),
     ("saved_prompts", "user_id", "INTEGER"),
+    ("materials", "pdf_disk_uuid", "TEXT"),
+    ("materials", "status", "TEXT"),
+    ("materials", "error_message", "TEXT"),
+    ("concept_links", "manual", "INTEGER NOT NULL DEFAULT 0"),
+    ("concept_links", "hidden", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 

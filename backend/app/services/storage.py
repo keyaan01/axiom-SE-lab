@@ -42,6 +42,23 @@ def concept_canvas_dir(concept_id: int) -> Path:
     return d
 
 
+def revision_dir(course_id: int) -> Path:
+    """Directory holding one course's compiled revision PDFs + thumbnails
+    (both live side by side here, named {uuid4hex}.pdf|.png — unlike notes,
+    which split pdf/thumb across two separate per-course dirs)."""
+    d = config.REVISIONS_DIR / str(course_id)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def revision_canvas_dir(revision_id: int) -> Path:
+    """Directory holding one revision's dropped canvas files (mirrors
+    concept_canvas_dir, but keyed on revision_id instead of concept_id)."""
+    d = config.REVISION_CANVAS_DIR / str(revision_id)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def remove_course_files(course_id: int) -> None:
     """Best-effort removal of a course's on-disk files (uploads/notes/thumbs).
 

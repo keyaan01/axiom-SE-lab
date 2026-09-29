@@ -14,14 +14,22 @@ backend/bin/
 # Internal build notes
 CLAUDE.md
 
+# Test / tooling caches
+.pytest_cache/
+
 # Editor / OS junk
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
-backend/bin/
-CLAUDE.md
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
+
+# Internal docs / planning / guides (kept locally, never published)
+/ARCHITECTURE.md
+/Axiom_Project_Document.md
+/BACKLOG.md
+/backend/README.md
+/docs/
+/frontend/CANVAS.md
+/frontend/ANALYSIS.md
+/frontend/MINDMAP.md
+/frontend/DESIGN.md

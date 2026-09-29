@@ -138,8 +138,8 @@ def gather_course_attachments(course_id: int, only_material_ids: set[int] | None
     conn = db.get_connection()
     try:
         rows = conn.execute(
-            "SELECT id, kind, display_name, disk_uuid, mime_type, gemini_file_name "
-            "FROM materials WHERE course_id = ? ORDER BY id",
+            "SELECT id, kind, display_name, disk_uuid, mime_type, gemini_file_name, "
+            "pdf_disk_uuid, status FROM materials WHERE course_id = ? ORDER BY id",
             (course_id,),
         ).fetchall()
     finally:
@@ -153,10 +153,25 @@ def gather_course_attachments(course_id: int, only_material_ids: set[int] | None
     upload_dir = storage.course_upload_dir(course_id)
     atts = {"material": [], "pyq": []}
     for r in rows:
+        # A material still converting (office->PDF) or that failed conversion
+        # has no usable bytes yet — never feed a half-converted file to
+        # extraction/note-gen. Legacy rows predate this column (status IS
+        # NULL) and are treated as ready, same as a plain PDF/image upload.
+        if r["status"] in ("converting", "failed"):
+            continue
+        if r["pdf_disk_uuid"]:
+            # Office document that's been converted to PDF (or a plain PDF
+            # upload, which stores its own disk_uuid here too) — extraction
+            # always sees the PDF bytes, never the original office file.
+            disk_path = str(upload_dir / r["pdf_disk_uuid"])
+            mime = "application/pdf"
+        else:
+            disk_path = str(upload_dir / r["disk_uuid"])
+            mime = r["mime_type"]
         att = Attachment(
             display_name=r["display_name"],
-            disk_path=str(upload_dir / r["disk_uuid"]),
-            mime=r["mime_type"],
+            disk_path=disk_path,
+            mime=mime,
             kind=r["kind"],
             material_id=r["id"],
             gemini_file_name=r["gemini_file_name"],
@@ -231,6 +246,19 @@ def run_extract_job(course_id: int, job_id: int, mode: str = "new") -> None:
                     ).fetchall()
                 ]
                 # Re-generation replaces the previous concept set for this course.
+                # notes.concept_id is ON DELETE SET NULL (not CASCADE), so a blind
+                # concept wipe would ORPHAN every note (concept_id -> NULL) rather
+                # than remove it — leaving stale notes in the Notes grid, still
+                # served by /courses/:id/notes and reachable only via the legacy
+                # study view. "Re-analyze all" promises the notes are removed, so
+                # delete them (and their pdf/thumb files; note_annotations cascade)
+                # explicitly BEFORE wiping the concepts.
+                for note_row in conn.execute(
+                    "SELECT id, pdf_disk_uuid, thumb_disk_uuid FROM notes WHERE course_id = ?",
+                    (course_id,),
+                ).fetchall():
+                    _remove_note_files(course_id, note_row)
+                conn.execute("DELETE FROM notes WHERE course_id = ?", (course_id,))
                 conn.execute("DELETE FROM concepts WHERE course_id = ?", (course_id,))
                 for idx, cpt in enumerate(concepts):
                     material_id = _resolve_material_id(cpt.source_file, materials)
@@ -460,7 +488,7 @@ def _compile_one_note(course_id: int, note_id: int, concept_name: str, concept_s
         return False
 
 
-def run_note_retry(note_id: int) -> None:
+def run_note_retry(note_id: int, job_id: int | None = None) -> None:
     """Retry ONE failed (or stuck) note: same pipeline as run_generate_job's
     per-concept step, but scoped to a single existing note row. The caller
     (the /notes/{id}/retry endpoint) has already flipped the note to
@@ -514,8 +542,18 @@ def run_note_retry(note_id: int) -> None:
         _compile_one_note(
             note["course_id"], note_id, concept_name, concept_summary,
             materials, pyqs, sibling_names,
-            extra_instructions=instr, enhancement_keys=keys,
+            extra_instructions=instr, enhancement_keys=keys, job_id=job_id,
         )
+    except gemini.GeminiCancelled:
+        conn = db.get_connection()
+        try:
+            conn.execute(
+                "UPDATE notes SET status = 'failed', error_message = 'Cancelled.' WHERE id = ?",
+                (note_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
     except Exception as e:
         conn = db.get_connection()
         try:
@@ -526,6 +564,11 @@ def run_note_retry(note_id: int) -> None:
             conn.commit()
         finally:
             conn.close()
+    finally:
+        # Close out the 1-note job so the progress card + Cancel button clear
+        # (and _active_job stops blocking the next retry for this course).
+        if job_id is not None:
+            _set_job(job_id, status="done", progress=1, message="Done.")
 
 
 def run_generate_job(course_id: int, job_id: int, mode: str = "new", concept_ids=None) -> None:

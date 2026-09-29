@@ -24,6 +24,19 @@ def _set_quiz(concept_id: int, **fields) -> None:
         conn.close()
 
 
+def _is_quiz_cancelled(concept_id: int) -> bool:
+    """True once the quiz row is no longer 'generating' — the /quiz/cancel
+    endpoint flips it to 'failed', which this reports as a cancel request."""
+    conn = db.get_connection()
+    try:
+        row = conn.execute(
+            "SELECT status FROM quizzes WHERE concept_id = ?", (concept_id,)
+        ).fetchone()
+        return bool(row) and row["status"] != "generating"
+    finally:
+        conn.close()
+
+
 def run_quiz_job(concept_id: int) -> None:
     """Quiz-generation job body for one concept (runs in a background thread)."""
     try:
@@ -51,10 +64,15 @@ def run_quiz_job(concept_id: int) -> None:
 
         atts = gather_course_attachments(concept["course_id"])
         questions = gemini.generate_quiz(
-            concept["name"], concept["summary"], atts["material"], atts["pyq"], sibling_names
+            concept["name"], concept["summary"], atts["material"], atts["pyq"], sibling_names,
+            should_cancel=lambda: _is_quiz_cancelled(concept_id),
         )
 
         questions_json = json.dumps([q.model_dump() for q in questions])
         _set_quiz(concept_id, status="ready", questions_json=questions_json, error_message=None)
+    except gemini.GeminiCancelled:
+        # The /quiz/cancel endpoint already set status='failed' + 'Cancelled.';
+        # leave that in place rather than overwriting with the exception text.
+        pass
     except Exception as e:
         _set_quiz(concept_id, status="failed", error_message=f"{type(e).__name__}: {e}")

@@ -17,6 +17,8 @@ This router is mounted WITHOUT the require_auth dependency so
 status/signup/login/security-question/reset always work; /auth/me is the one
 endpoint here that does require a valid session.
 """
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Response, Request
 from pydantic import BaseModel, Field
 
@@ -99,6 +101,13 @@ class ResetIn(BaseModel):
     email: str
     security_answer: str
     new_password: str
+
+
+class ChangePasswordIn(BaseModel):
+    current_password: str
+    new_password: str
+    security_question: Optional[str] = None
+    security_answer: Optional[str] = None
 
 
 @router.get("/auth/status")
@@ -271,6 +280,68 @@ def logout(request: Request, response: Response):
 @router.get("/auth/me")
 def me(user: dict = Depends(auth.require_auth)):
     return {"id": user["id"], "name": user["name"], "email": user["email"]}
+
+
+@router.post("/auth/change-password")
+def change_password(
+    payload: ChangePasswordIn,
+    response: Response,
+    user: dict = Depends(auth.require_auth),
+):
+    """Change the CURRENT account's password while logged in (verifies the
+    current password first), optionally also updating the security
+    question/answer used for forgot-password reset. Invalidates every
+    session for this account (including the one making this request) and
+    issues a fresh session cookie so the caller stays logged in."""
+    conn = db.get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM user_profile WHERE id = ?", (user["id"],)
+        ).fetchone()
+        stored_hash = (row["password_hash"] or "") if row else ""
+        if not row or not auth.verify_password(payload.current_password, stored_hash):
+            # 400 (not 401) on purpose: the caller IS authenticated (require_auth
+            # passed) — this is a wrong VALUE in the current-password FIELD, not a
+            # session-auth failure. The frontend's api.js dispatches a global
+            # `axiom:unauthorized` (→ logout to the auth gate) on ANY 401, so a 401
+            # here would kick the user out instead of just showing the field error.
+            raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+        if len(payload.new_password) < MIN_PASSWORD_LENGTH:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Password must be at least {MIN_PASSWORD_LENGTH} characters.",
+            )
+
+        account_id = row["id"]
+        new_hash = auth.hash_password(payload.new_password)
+
+        question = (payload.security_question or "").strip()
+        answer = (payload.security_answer or "").strip().lower()
+        if question and answer:
+            answer_hash = auth.hash_password(answer)
+            conn.execute(
+                "UPDATE user_profile SET password_hash = ?, security_question = ?, "
+                "security_answer_hash = ?, updated_at = datetime('now') WHERE id = ?",
+                (new_hash, question, answer_hash, account_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE user_profile SET password_hash = ?, updated_at = datetime('now') "
+                "WHERE id = ?",
+                (new_hash, account_id),
+            )
+
+        # Invalidate every session for this account (including the caller's
+        # current one) — a fresh session/cookie is issued below.
+        conn.execute("DELETE FROM sessions WHERE user_id = ?", (account_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    token = auth.create_session(account_id)
+    _set_session_cookie(response, token)
+    return {"ok": True}
 
 
 @router.post("/auth/delete-account")
