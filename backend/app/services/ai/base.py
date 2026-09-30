@@ -18,7 +18,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 @dataclass
@@ -131,6 +131,76 @@ class QuizQuestion(BaseModel):
     answer_text: str  # correct answer text for short, "" for mcq
     explanation: str
     marks: int
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_freeform(cls, data):
+        """Free-text providers (Anthropic/OpenAI/custom) don't go through
+        Gemini's response_schema, so they often name the question-type field
+        "type" (Claude does), sometimes omit a minor field, or use a variant
+        kind value. Normalize a dict here so a valid question isn't dropped over
+        cosmetics. Gemini is unaffected — its output already matches the fields,
+        and this only runs at model instantiation (no field defaults are added,
+        so the response_schema stays default-free)."""
+        if not isinstance(data, dict):
+            return data
+        d = dict(data)
+        if "kind" not in d and "type" in d:
+            d["kind"] = d["type"]
+        k = str(d.get("kind", "")).lower()
+        d["kind"] = "short" if "short" in k or "answer" in k else "mcq"
+        d.setdefault("category", "concept")
+        d.setdefault("options", [])
+        d.setdefault("answer_index", -1)
+        d.setdefault("answer_text", "")
+        d.setdefault("explanation", "")
+        d.setdefault("marks", 1)
+        return d
+
+
+class ConceptLink(BaseModel):
+    """One AI-discovered relationship between two concepts (mind map edge)."""
+    # No defaults on any field: the Gemini structured-output response_schema
+    # rejects Pydantic fields that carry a default value (mirrors QuizQuestion).
+    a: int          # concept id (from the numbered list in the prompt)
+    b: int          # the other concept id
+    label: str      # 3-6 word relationship name, plain text
+    strength: float # 0.0-1.0
+
+
+class QuestionType(BaseModel):
+    """One question-type bucket found across a course's past exam papers
+    (Build 12 — Question Analysis)."""
+    # No defaults on any field: the Gemini structured-output response_schema
+    # rejects Pydantic fields that carry a default value (mirrors QuizQuestion).
+    type: str   # e.g. "MCQ", "short answer", "derivation", "proof", "numerical"
+    count: int  # how many questions of this type were found across the attached papers
+    note: str   # a short observation about this type
+
+
+class TopicImportance(BaseModel):
+    """One recurring exam topic, ranked by importance/frequency (Build 12 —
+    Question Analysis)."""
+    # No defaults on any field (mirrors QuizQuestion/ConceptLink).
+    name: str                     # short topic label
+    concept_name: str             # mapped to a course concept name, or the model's own inferred topic name
+    importance: int               # 0-100
+    frequency: int                # how many times a question on this topic recurs across the papers
+    rationale: str                # one sentence on why this topic matters / how it's tested
+    sample_questions: list[str]   # 1-3 REAL questions taken from the attached papers
+
+
+class AnalysisResult(BaseModel):
+    """Structured output of AIProvider.analyze_questions — a course's
+    past-exam-question analysis (Build 12 — Question Analysis, Phase 1)."""
+    # No defaults on any field (mirrors QuizQuestion/ConceptLink) — Gemini's
+    # response_schema rejects Pydantic fields with a default value.
+    question_types: list[QuestionType]
+    topics: list[TopicImportance]
+    patterns: list[str]     # short recurring-pattern observations
+    summary: str             # short exam-strategy summary
+    papers_detected: int     # best-effort count of distinct papers/sittings among the attached files
+    total_questions: int     # best-effort total count of individual questions across all attached files
 
 
 # ---------------------------------------------------------------------------
@@ -320,6 +390,196 @@ def quiz_prompt_text(name: str, summary: str, siblings: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Link discovery (Build 10 — "Constellation" curriculum mind map). A single
+# text-only call over the WHOLE curriculum's concept list, asking the model to
+# find genuinely-related concept pairs (mind map edges). No attachments.
+# ---------------------------------------------------------------------------
+
+_LINKS_PROMPT = (
+    "You are mapping a student's curriculum as a concept graph.\n"
+    "Below is the complete list of concepts the student is studying, one per line, in the form\n"
+    "id | course | concept name — summary\n\n"
+    "<<CONCEPTS>>\n\n"
+    "Find the pairs of DIFFERENT concepts that are genuinely, specifically related — one builds on "
+    "the other, they share a core technique or principle, one is a special case or application of "
+    "the other, or they are commonly studied or confused together. Connections BETWEEN different "
+    "courses are especially valuable when they are real (e.g. a math tool an engineering course "
+    "uses) — but never invent a link just to bridge courses.\n\n"
+    "Rules:\n"
+    "- Return each relationship once (a-b and b-a are the same pair; never link a concept to itself).\n"
+    "- Be selective: only clear, defensible relationships. Most concepts should end up with 1-3 "
+    "links; a concept with zero links is fine.\n"
+    "- label: 3-6 words naming the relationship (e.g. \"builds on\", \"same underlying principle\", "
+    "\"applies this technique\") — plain text, no LaTeX.\n"
+    "- strength: 0.0-1.0 — 1.0 means one directly depends on the other, 0.4 means loosely related.\n"
+    "- a and b MUST be ids copied exactly from the list above.\n"
+)
+
+
+def links_prompt_text(concept_lines: str) -> str:
+    """Substitute the concept list into the link-discovery prompt."""
+    return _LINKS_PROMPT.replace("<<CONCEPTS>>", concept_lines)
+
+
+# ---------------------------------------------------------------------------
+# Question analysis (Build 12 — "Question Analysis", Phase 1). A single call
+# over ONLY a course's attached past-exam-question (PYQ) files: infer the
+# question-type mix, recurring patterns, and a per-topic importance ranking
+# (mapped to the course's known concept names when given, else clustered from
+# the questions themselves). Grounding rule preserved: this NEVER feeds
+# concepts/teaching — it only reads PYQs, the same files the note pipeline
+# treats as practice-style/citation source only.
+# ---------------------------------------------------------------------------
+
+_ANALYSIS_PROMPT = (
+    "You are analyzing a student's PAST EXAM QUESTIONS (PYQs) for one course. The attached files are "
+    "ONLY past exam papers/question sheets — analyze ONLY what is actually asked in them. Do not use "
+    "outside knowledge of the subject to invent questions or topics that are not actually present in "
+    "the attached files.\n\n"
+    "<<CONCEPTS_BLOCK>>\n\n"
+    "Produce a structured analysis:\n"
+    "- question_types: the mix of question types you observe (e.g. MCQ, short answer, long answer, "
+    "numerical, derivation, proof, theory, ...). For each: \"type\", \"count\" (how many questions of "
+    "this type you found across all attached papers), and a short \"note\".\n"
+    "- topics: the recurring TOPICS the questions test, each with:\n"
+    "  - name: a short topic label\n"
+    "  - concept_name: <<CONCEPT_MAP_INSTRUCTION>>\n"
+    "  - importance: an integer 0-100, how heavily this topic is emphasized across the papers (weigh "
+    "frequency, marks, and recurrence)\n"
+    "  - frequency: how many times a question on this topic appears across the attached papers\n"
+    "  - rationale: one sentence on why this topic matters / how it tends to be tested\n"
+    "  - sample_questions: 1-3 REAL question(s) taken verbatim (or near-verbatim) from the attached "
+    "papers that test this topic\n"
+    "- patterns: a list of short observations about RECURRING PATTERNS across the papers (e.g. "
+    "\"Chapter 3 appears in every paper\", \"Derivations make up about 40% of the marks\", \"Topics X "
+    "and Y are always paired in the same question\")\n"
+    "- summary: a short (2-4 sentence) exam-strategy summary for the student\n"
+    "- papers_detected: your best-effort count of distinct exam papers/sittings among the attached files\n"
+    "- total_questions: your best-effort total count of individual questions across all attached files\n\n"
+    "Return ONLY the JSON object for the analysis result — no prose, no markdown fences."
+)
+
+
+_REVISION_PROMPT = r"""You are writing an EXAM REVISION document as LaTeX BODY content, to help a student
+prepare for their upcoming exam "<<EXAM_NAME>>". It is inserted into a document whose preamble is ALREADY
+loaded (never repeat it):
+- \documentclass{article}; packages: amsmath, amssymb, graphicx, tcolorbox, enumitem, xcolor, hyperref, parskip.
+- A custom environment \begin{practice} ... \end{practice} for exam-style problems.
+
+This revision covers the following topics, from an analysis of past exam questions, ORDERED MOST TO LEAST
+IMPORTANT. Write your \section's in EXACTLY this order (most important topic first):
+<<TOPICS_BLOCK>>
+
+CONCEPTS THIS EXAM COVERS (context only — the topics above already map to these): <<CONCEPTS_LIST>>
+
+The attached files are labeled by role. Use ONLY the files labeled STUDY MATERIALS as the source of truth for
+teaching content. NEVER introduce a topic, term, or fact that is not present in the study materials, even if
+it appears in the past exam questions. The files labeled PAST EXAM QUESTIONS are ONLY for selecting real
+questions to reproduce + solve and for judging importance/style — never a source of new teaching content.
+
+Structure: one \section per topic, in the given most-to-least-important order. For each topic section:
+- A CONCISE revision of the must-know points, definitions, and formulas for that topic, drawn strictly from
+  the study materials. This is a REVISION, not a full lesson: be tight and high-yield — bullet points, key
+  formulas in display math \[ ... \], a short worked example only where it truly clarifies. Do not pad.
+- End the section with ONE \begin{practice}...\end{practice} block containing BOTH:
+  (a) the highest-value ACTUAL past question(s) testing this topic (from the attached PAST EXAM QUESTION
+      files, or the sample questions listed above), each reproduced faithfully as a problem, followed by a
+      complete step-by-step worked solution, ending with a small italic source note on its own line, e.g.
+      {\footnotesize\emph{(Source: <PYQ file name> — from the past exam questions.)}}, naming the EXACT file
+      name from its "PAST EXAM FILE — <name>:" label;
+  (b) a few FRESH targeted practice questions in the same style, each clearly starting with \textbf{Practice:}
+      and followed by a complete worked solution, grounded strictly in the study materials, ending with
+      {\footnotesize\emph{(Practice question — not from a past paper.)}} so its origin is always clear.
+  If no real past question is available for a topic, use ONLY (b)-style practice questions for it — never
+  fabricate a question and label it as if it came from a past paper.
+
+RENDERING: use display math \[ ... \] for long or complex expressions rather than a long inline $...$ that
+overruns a line; avoid extremely long unbreakable tokens or URLs; keep every section tight and high-yield,
+not padded.
+
+STRICT OUTPUT RULES:
+- Output ONLY LaTeX body content. Do NOT include \documentclass, \usepackage, \begin{document},
+  \end{document}, a title, or \maketitle.
+- Only use the packages/commands listed above. Do NOT use \newcommand, \usepackage, or
+  \includegraphics of external files.
+- Every \item MUST be inside \begin{itemize}...\end{itemize} or \begin{enumerate}...\end{enumerate}
+  (a list may live inside the practice box). NEVER write \item outside a list.
+- Every \begin{...} must have a matching \end{...}, and every { must have a matching }.
+- Escape literal special characters (\% \& \_ \# etc.); keep math inside math mode.
+- Write ALL math symbols as LaTeX commands inside math mode (e.g. $\alpha$, $\times$, $\le$,
+  $\to$, $\Rightarrow$, $x^{2}$, $\frac{a}{b}$). Do NOT paste raw Unicode symbols/superscripts
+  (×, ≤, →, α, ², √, etc.) or "smart" quotes/dashes — plain ASCII in prose, commands in math.
+- Every $ opens AND closes; never leave a dangling $ or mix $ with \[ \]. Subscripts/superscripts
+  must have braces for multi-character args ($x_{ij}$, not $x_ij$).
+- Prefer itemize/enumerate over tables. If a table is truly needed, keep it small and make the
+  number of & separators in EVERY row match the column spec exactly, ending each row with \\.
+- Do NOT reference figures, images, \ref/\cite, or files that don't exist.
+- Do NOT wrap the output in markdown code fences.
+Begin now with the first \section (the most important topic)."""
+
+
+def revision_topics_block(ranked_topics: list[dict]) -> str:
+    """Render the analysis's ranked topic list into numbered prompt lines
+    (most-important first — callers pass ranked_topics already sorted by
+    importance descending). Each topic dict is TopicImportance-shaped
+    (name/concept_name/importance/frequency/rationale/sample_questions), as
+    stored in question_analysis.data_json.
+    """
+    if not ranked_topics:
+        return "No ranked topics available — cover the exam's concepts generally, in a sensible order."
+    lines = []
+    for i, t in enumerate(ranked_topics, start=1):
+        samples = t.get("sample_questions") or []
+        sample_text = " | ".join(s for s in samples if s) or "none"
+        lines.append(
+            f"{i}. \"{t.get('name', '')}\" (concept: {t.get('concept_name', '')}) — "
+            f"importance {t.get('importance', 0)}/100, frequency {t.get('frequency', 0)}. "
+            f"{t.get('rationale', '')} Sample past questions: {sample_text}"
+        )
+    return "\n".join(lines)
+
+
+def revision_prompt_text(exam_name: str, topics_block: str, concepts_list: str) -> str:
+    """Substitute the revision prompt's placeholders."""
+    return (_REVISION_PROMPT
+            .replace("<<EXAM_NAME>>", exam_name or "")
+            .replace("<<TOPICS_BLOCK>>", topics_block)
+            .replace("<<CONCEPTS_LIST>>", concepts_list))
+
+
+def analysis_prompt_text(concepts: list[dict] | None) -> str:
+    """Substitute the concept list (or a no-concepts fallback) into the
+    question-analysis prompt.
+
+    concepts is a list of {"name": ..., "summary": ...}-shaped dicts (may be
+    empty/None — the extraction stage may not have run yet). When given, the
+    model is asked to map each topic's concept_name to the CLOSEST matching
+    name from this list (copied exactly) so the analysis lines up with the
+    course's actual concepts; when empty, the model clusters topics on its
+    own and concept_name becomes its own inferred topic name (per ANALYSIS.md
+    §8 "No concepts" edge case).
+    """
+    if concepts:
+        lines = "\n".join(f"- {c['name']}: {(c.get('summary') or '').strip()}" for c in concepts)
+        concepts_block = (
+            "This course's known CONCEPTS (map each topic's concept_name to the closest one of these "
+            "EXACT names when it genuinely applies):\n" + lines
+        )
+        concept_map_instruction = (
+            "the closest matching concept name from the list above, copied EXACTLY; if truly none fit, "
+            "use your own short topic name instead"
+        )
+    else:
+        concepts_block = (
+            "No course concepts are available yet — cluster the questions into your own sensible topics."
+        )
+        concept_map_instruction = "your own inferred topic name for this cluster (no concept list is available)"
+    return (_ANALYSIS_PROMPT
+            .replace("<<CONCEPTS_BLOCK>>", concepts_block)
+            .replace("<<CONCEPT_MAP_INSTRUCTION>>", concept_map_instruction))
+
+
+# ---------------------------------------------------------------------------
 # Ask/explain (Phase A of the in-reader "highlight/snip -> ask AI" study
 # assistant). Provider-agnostic: ASK_MODES supplies a canned instruction per
 # quick-action mode, build_ask_messages assembles the (system, user) prompt
@@ -371,6 +631,40 @@ def build_ask_messages(concept_name: str, concept_summary: str, instruction: str
     if (concept_summary or "").strip():
         lines.append("")
         lines.append(f"Lesson summary: {concept_summary.strip()}")
+    user = "\n".join(lines)
+    return system, user
+
+
+def build_revision_ask_messages(exam_name: str, instruction: str,
+                                 selection: str = "", context: str = "",
+                                 has_image: bool = False) -> tuple[str, str]:
+    """Same shape as build_ask_messages, but scoped to a per-exam revision
+    document instead of a per-concept lesson (a student asking about a
+    passage/figure while studying their revision PDF). Copied verbatim aside
+    from the system line's framing and dropping the concept-summary line
+    (a revision has no single concept summary to append)."""
+    system = (
+        "You are a helpful study tutor. A student is asking about a specific passage or "
+        f"figure from their exam revision for \"{exam_name}\". You may use general knowledge "
+        "and analogies to help explain, but stay relevant to that passage and to the revision "
+        "at hand — don't wander into unrelated territory. Any math MUST be written in LaTeX "
+        "math mode ($...$ for inline, $$...$$ for display) so it renders correctly with "
+        "KaTeX. Keep your answer focused and not overly long."
+    )
+    lines = [instruction]
+    if (selection or "").strip():
+        lines.append("")
+        lines.append("Passage:")
+        lines.append(selection.strip())
+    if has_image:
+        lines.append("")
+        lines.append(
+            "An image of the region is attached — look at it and explain what it shows."
+        )
+    if (context or "").strip():
+        lines.append("")
+        lines.append("Nearby context from the revision:")
+        lines.append(context.strip())
     user = "\n".join(lines)
     return system, user
 
@@ -447,6 +741,37 @@ class AIProvider(ABC):
     def generate_quiz(self, name: str, summary: str, materials: list[Attachment],
                        pyqs: list[Attachment], sibling_names=None, should_cancel=None) -> list[QuizQuestion]:
         """Generate a quiz (concept + PYQ style questions) for one concept."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def discover_links(self, concept_lines: str, should_cancel=None) -> list[ConceptLink]:
+        """Find related concept pairs across the whole curriculum (text-only call, no attachments)."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def analyze_questions(self, pyqs: list[Attachment], concepts: list[dict],
+                           should_cancel=None) -> AnalysisResult:
+        """Analyze a course's past exam questions (PYQs) ONLY — never study
+        materials — for the question-type mix, recurring patterns, and a
+        per-topic importance/frequency ranking (Build 12 — Question
+        Analysis). concepts is the course's known concept list (may be
+        empty), used to map each topic to a concept name; see
+        analysis_prompt_text for how an empty list is handled.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def generate_revision_latex(self, exam_name: str, ranked_topics: list[dict],
+                                 materials: list[Attachment], pyqs: list[Attachment],
+                                 concepts: list[dict], should_cancel=None) -> str:
+        """Generate an exam revision document's LaTeX body (Build 12 —
+        Question Analysis, Phase 3): one \\section per topic in ranked_topics'
+        order (most->least important, from the course's question_analysis),
+        each a concise revision of the study-materials content plus a
+        practice block mixing real cited PYQs and fresh practice questions.
+        Mirrors generate_note_latex's grounding rule (materials are the only
+        teaching source) and streaming behavior.
+        """
         raise NotImplementedError
 
     @abstractmethod
@@ -530,28 +855,186 @@ def pdf_to_text(disk_path) -> str:
         doc.close()
 
 
-def parse_json_list(text: str, model) -> list:
-    """Parse a JSON array of objects out of raw model text and validate each
-    element against a Pydantic model.
-
-    Tolerates a ```json ... ``` (or bare ```) fence around the array and any
-    leading/trailing prose by locating the outermost [...] span. Raises a
-    clear RuntimeError if no JSON array can be found/parsed.
-    """
+def _strip_json_fence(text: str) -> str:
+    """Drop a leading ```json / ``` fence and a trailing ``` fence, and trim."""
     raw = (text or "").strip()
-    if not raw:
-        raise RuntimeError("Model returned an empty response.")
     if raw.startswith("```"):
-        # Strip a leading ```json / ``` fence and a trailing ``` fence.
         raw = raw[3:]
-        if raw.lstrip().startswith("json"):
+        if raw.lstrip().lower().startswith("json"):
             raw = raw.lstrip()[4:]
         if raw.rstrip().endswith("```"):
             raw = raw.rstrip()[:-3]
         raw = raw.strip()
+    return raw
+
+
+def _remove_trailing_commas(s: str) -> str:
+    """Delete commas that sit right before a } or ] (a common model mistake that
+    the strict json module rejects), while never touching commas inside strings."""
+    out = []
+    in_str = False
+    esc = False
+    for i, ch in enumerate(s):
+        if in_str:
+            out.append(ch)
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+            out.append(ch)
+            continue
+        if ch == ",":
+            j = i + 1
+            while j < len(s) and s[j] in " \t\r\n":
+                j += 1
+            if j < len(s) and s[j] in "]}":
+                continue  # drop this trailing comma
+        out.append(ch)
+    return "".join(out)
+
+
+def _iter_json_objects(s: str):
+    """Yield each COMPLETE top-level {...} object substring, string-aware. A
+    truncated trailing object (unbalanced braces) is simply never yielded, so a
+    cut-off array still gives up all of its complete elements."""
+    depth = 0
+    in_str = False
+    esc = False
+    start = None
+    for i, ch in enumerate(s):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start is not None:
+                    yield s[start:i + 1]
+                    start = None
+
+
+def _validate_items(data, model) -> list:
+    """Validate each dict against the model, silently dropping any element that
+    doesn't fit (e.g. a truncated final quiz question missing a field) — one bad
+    item never sinks the whole batch."""
+    out = []
+    for d in data:
+        if not isinstance(d, dict):
+            continue
+        try:
+            out.append(model(**d))
+        except Exception:
+            continue
+    return out
+
+
+def parse_json_list(text: str, model) -> list:
+    """Parse a JSON array of objects out of raw model text and validate each
+    element against a Pydantic model — robustly, for providers (Anthropic /
+    OpenAI / custom) that emit JSON as free text rather than a guaranteed schema.
+
+    Tolerates a ```json``` fence + surrounding prose, trailing commas, one
+    malformed element, and a TRUNCATED tail (a quiz cut off mid-question still
+    yields every complete question). Strategy: locate the array span, try a
+    strict parse first, then fall back to salvaging complete {...} objects one at
+    a time. Raises RuntimeError only if nothing usable can be recovered.
+    """
+    raw = _strip_json_fence(text)
+    if not raw:
+        raise RuntimeError("Model returned an empty response.")
     start = raw.find("[")
-    end = raw.rfind("]")
-    if start == -1 or end == -1 or end < start:
-        raise RuntimeError("Model response did not contain a JSON array.")
-    data = json.loads(raw[start:end + 1])
-    return [model(**d) for d in data]
+    span = raw[start:] if start != -1 else raw
+    # 1) Strict attempt on the outermost [...] span (fast path).
+    end = span.rfind("]")
+    if end != -1:
+        try:
+            data = json.loads(_remove_trailing_commas(span[:end + 1]))
+            if isinstance(data, list):
+                out = _validate_items(data, model)
+                if out:
+                    return out
+        except Exception:
+            pass
+    # 2) Salvage: pull each complete object out individually (survives truncation
+    #    and a syntax error anywhere in the array).
+    objs = []
+    for chunk in _iter_json_objects(span):
+        try:
+            objs.append(json.loads(_remove_trailing_commas(chunk)))
+        except Exception:
+            continue
+    out = _validate_items(objs, model)
+    if not out:
+        raise RuntimeError("Model response did not contain a usable JSON array.")
+    return out
+
+
+def _close_json(s: str) -> str:
+    """Best-effort close of a truncated JSON snippet: terminate an open string
+    and append the missing closing brackets (string-aware bracket tracking)."""
+    stack = []
+    in_str = False
+    esc = False
+    for ch in s:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in "{[":
+            stack.append(ch)
+        elif ch == "}":
+            if stack and stack[-1] == "{":
+                stack.pop()
+        elif ch == "]":
+            if stack and stack[-1] == "[":
+                stack.pop()
+    suffix = '"' if in_str else ""
+    for opener in reversed(stack):
+        suffix += "}" if opener == "{" else "]"
+    return s + suffix
+
+
+def parse_json_object(text: str, model):
+    """Parse a single JSON object out of raw model text and validate it against a
+    Pydantic model (the single-object counterpart to parse_json_list, used by
+    AnalysisResult). Tolerates a fence, surrounding prose, trailing commas, and a
+    lightly truncated tail (via best-effort bracket closing)."""
+    raw = _strip_json_fence(text)
+    if not raw:
+        raise RuntimeError("Model returned an empty response.")
+    start = raw.find("{")
+    if start == -1:
+        raise RuntimeError("Model response did not contain a JSON object.")
+    end = raw.rfind("}")
+    base = raw[start:end + 1] if end > start else raw[start:]
+    cleaned = _remove_trailing_commas(base)
+    for attempt in (base, cleaned, _close_json(cleaned)):
+        try:
+            data = json.loads(attempt)
+        except Exception:
+            continue
+        if isinstance(data, dict):
+            return model(**data)
+    raise RuntimeError("Model response did not contain a parseable JSON object.")

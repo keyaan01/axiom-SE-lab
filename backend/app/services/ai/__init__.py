@@ -28,12 +28,15 @@ from .base import (
     Attachment,
     ConceptOut,
     QuizQuestion,
+    ConceptLink,
+    AnalysisResult,
     NOTE_ENHANCEMENTS,
     enhancement_catalog,
     enhancement_instructions,
     valid_enhancement_keys,
     ASK_MODES,
     build_ask_messages,
+    build_revision_ask_messages,
 )
 from . import gemini_provider
 from .gemini_provider import GeminiProvider, AVAILABLE_MODELS
@@ -201,6 +204,20 @@ def repair_note_latex(name, broken_body, error, should_cancel=None):
 def generate_quiz(name, summary, materials, pyqs, sibling_names=None, should_cancel=None):
     return provider().generate_quiz(
         name, summary, materials, pyqs, sibling_names=sibling_names, should_cancel=should_cancel,
+    )
+
+
+def discover_links(concept_lines, should_cancel=None):
+    return provider().discover_links(concept_lines, should_cancel=should_cancel)
+
+
+def analyze_questions(pyqs, concepts, should_cancel=None):
+    return provider().analyze_questions(pyqs, concepts, should_cancel=should_cancel)
+
+
+def generate_revision_latex(exam_name, ranked_topics, materials, pyqs, concepts, should_cancel=None):
+    return provider().generate_revision_latex(
+        exam_name, ranked_topics, materials, pyqs, concepts, should_cancel=should_cancel,
     )
 
 

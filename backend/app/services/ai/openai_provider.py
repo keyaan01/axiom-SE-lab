@@ -19,6 +19,8 @@ from .base import (
     Attachment,
     ConceptOut,
     QuizQuestion,
+    ConceptLink,
+    AnalysisResult,
     AICancelled,
     NOTE_MAX_TOKENS,
     concept_prompt_text,
@@ -26,6 +28,10 @@ from .base import (
     extra_instructions_block,
     quiz_prompt_text,
     repair_prompt_text,
+    links_prompt_text,
+    analysis_prompt_text,
+    revision_topics_block,
+    revision_prompt_text,
     read_bytes,
     is_pdf,
     is_image,
@@ -213,6 +219,61 @@ class OpenAIProvider(AIProvider):
                 raise RuntimeError("Model did not return a parseable JSON object.")
         return items
 
+    @staticmethod
+    def _parse_object(content: str):
+        """Parse a bare JSON OBJECT out of raw model text (the single-object
+        counterpart to _parse_items, used for AnalysisResult — a structured
+        object, not a list of items). Returns the dict, or None if the text
+        can't be parsed into one.
+        """
+        if not content:
+            return None
+        raw = content.strip()
+        if raw.startswith("```"):
+            raw = raw[3:]
+            if raw.lstrip().startswith("json"):
+                raw = raw.lstrip()[4:]
+            if raw.rstrip().endswith("```"):
+                raw = raw.rstrip()[:-3]
+            raw = raw.strip()
+        try:
+            obj = json.loads(raw)
+        except Exception:
+            return None
+        return obj if isinstance(obj, dict) else None
+
+    def _structured_object_call(self, messages: list, should_cancel=None,
+                                 max_tokens: int = _STRUCTURED_MAX_TOKENS) -> dict:
+        """One JSON-object structured chat completion, with ONE forceful
+        re-ask if the response can't be parsed. Returns the raw dict (still
+        needs validating into a Pydantic model by the caller). Mirrors
+        _structured_call, but the target shape IS the whole object (no
+        {"items": [...]} wrapper convention).
+        """
+        def _ask(msgs):
+            def _call():
+                return self._client_obj().chat.completions.create(
+                    model=self._model(),
+                    messages=msgs,
+                    response_format={"type": "json_object"},
+                    max_tokens=max_tokens,
+                    temperature=0.2,
+                )
+            resp = retry_call(_call, should_cancel=should_cancel)
+            return (resp.choices[0].message.content or "").strip()
+
+        content = _ask(messages)
+        obj = self._parse_object(content)
+        if obj is None:
+            retry_messages = messages + [
+                {"role": "user", "content": "Return ONLY the JSON object, no prose."},
+            ]
+            content2 = _ask(retry_messages)
+            obj = self._parse_object(content2)
+            if obj is None:
+                raise RuntimeError("Model did not return a parseable JSON object.")
+        return obj
+
     def extract_concepts(self, materials: list, should_cancel=None) -> list:
         """Ask for the concept list from study materials only (json_object
         mode requires a top-level object, so the shared prompt is extended
@@ -239,6 +300,28 @@ class OpenAIProvider(AIProvider):
         if not data:
             raise RuntimeError("Model returned an empty quiz.")
         return data
+
+    def discover_links(self, concept_lines: str, should_cancel=None) -> list:
+        """Find related concept pairs across the whole curriculum (Build 10).
+        Text-only, no attachments; an empty list is a VALID result.
+        """
+        prompt = links_prompt_text(concept_lines) + (
+            "\n\nRespond with a single JSON OBJECT of the form "
+            '{"items": [ ... ]} — an object, not a bare array.'
+        )
+        messages = self._build_messages(prompt, [], [])
+        items = self._structured_call(messages, should_cancel=should_cancel)
+        return [ConceptLink(**d) for d in items]
+
+    def analyze_questions(self, pyqs: list, concepts: list,
+                           should_cancel=None) -> AnalysisResult:
+        """Analyze a course's past exam questions ONLY (Build 12 — Question
+        Analysis). materials=[] — this call never sees study materials.
+        """
+        prompt = analysis_prompt_text(concepts)
+        messages = self._build_messages(prompt, [], pyqs)
+        obj = self._structured_object_call(messages, should_cancel=should_cancel)
+        return AnalysisResult(**obj)
 
     # -- streaming text calls (notes / repair) ---------------------------------
 
@@ -292,6 +375,14 @@ class OpenAIProvider(AIProvider):
     def repair_note_latex(self, name: str, broken_body: str, error: str, should_cancel=None) -> str:
         prompt = repair_prompt_text(name, error, broken_body)
         messages = [{"role": "user", "content": prompt}]
+        return self._stream_text(messages, should_cancel=should_cancel)
+
+    def generate_revision_latex(self, exam_name: str, ranked_topics: list, materials: list, pyqs: list,
+                                 concepts: list, should_cancel=None) -> str:
+        topics_block = revision_topics_block(ranked_topics)
+        concepts_list = ", ".join(c.get("name", "") for c in concepts) if concepts else "none"
+        prompt = revision_prompt_text(exam_name, topics_block, concepts_list)
+        messages = self._build_messages(prompt, materials, pyqs)
         return self._stream_text(messages, should_cancel=should_cancel)
 
     def stream_answer(self, system: str, user: str, image: str | None = None, should_cancel=None):
