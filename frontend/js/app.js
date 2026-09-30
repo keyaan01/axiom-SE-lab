@@ -12,7 +12,41 @@ const renameIcon =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
   '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>';
 
+// Archive-box icon (Courses page redesign — semester "Archive" control).
+const archiveIcon =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">' +
+  '<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8"/><path d="M10 13h4"/></svg>';
+
+// Friendly open-book glyph for Courses-page empty states.
+const emptyCourseIcon =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="h-8 w-8 text-subtle">' +
+  '<path d="M12 5c-1.7-1.2-4-1.7-6.5-1.7S1 3.9 1 5.6v12.8c0 .3.3.5.6.4C3.7 18 5.9 18 8 18.7c1.5.5 2.9 1.2 4 2.1"/>' +
+  '<path d="M12 5c1.7-1.2 4-1.7 6.5-1.7S23 3.9 23 5.6v12.8c0 .3-.3.5-.6.4-2.1-.9-4.3-.9-6.4-.2-1.5.5-2.9 1.2-4 2.1"/>' +
+  '<path d="M12 5v14.8"/></svg>';
+
 const esc = ui.escapeHtml;
+
+// Tiny 14px stroke icons for the course-card stat chips (Build 13 FF2, Fix 1):
+// a document (materials), a small connected-nodes/graph glyph (concepts), and
+// a pencil (notes) — consistent stroke-width/linecap with the app's other
+// inline icons (trashIcon, archiveIcon, etc.) at a smaller scale.
+const statMaterialIcon =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M7 3h7l5 5v12a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1z"/><path d="M14 3v5h5"/></svg>';
+const statConceptIcon =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+  '<circle cx="5" cy="6" r="1.6"/><circle cx="18" cy="6" r="1.6"/><circle cx="12" cy="18" r="1.6"/>' +
+  '<path d="M6.4 7.1L11 16M17.6 7.1L13 16"/></svg>';
+const statNoteIcon =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>';
+
+// One small icon+label pill for the course-card stat row. `label` is the
+// full singular/plural text (e.g. "2 materials") and is shown directly in
+// the chip; it also stays on the tooltip for accessibility/hover clarity.
+function courseStatChip(icon, count, label) {
+  return `<span class="course-stat" title="${esc(label)}">${icon}<span>${esc(label)}</span></span>`;
+}
 
 /* ---------- accent signifiers (DESIGN.md §2 + §8 Priority 2) ----------
    Cycle the 5 candy accents (mint/peach/sky/lilac/lemon) as category
@@ -51,52 +85,66 @@ function field(label, inner, hint) {
 
 /* ---------- rendering ---------- */
 
+// First letters of the first two words (uppercased); a single-word name falls
+// back to its first 1-2 characters. Used for the course "app-icon" tile.
+function courseInitials(name) {
+  const words = (name || '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return '?';
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[1][0]).toUpperCase();
+}
+
 function courseCard(c, i = 0) {
   const code = c.code
-    ? `<span class="ml-2 rounded-md bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600 align-middle">${esc(c.code)}</span>`
+    ? `<div class="mt-1"><span class="chip ${accentChipCls(c.id)}">${esc(c.code)}</span></div>`
     : '';
   const desc = c.description
-    ? `<p class="mt-1.5 text-sm text-neutral-500 line-clamp-2">${esc(c.description)}</p>`
-    : `<p class="mt-1.5 text-sm italic text-neutral-300">No description</p>`;
+    ? `<p class="mt-3 text-sm text-muted line-clamp-2">${esc(c.description)}</p>`
+    : `<p class="mt-3 text-sm italic text-subtle">No description</p>`;
+  const materials = c.material_count || 0;
+  const concepts = c.concept_count || 0;
+  const notes = c.note_count || 0;
   return `
     <div data-action="open-course" data-id="${c.id}" style="${riseDelayStyle(i)}"
-      class="card card-interactive rise-in group cursor-pointer p-4">
-      <div class="flex items-start justify-between gap-2">
-        <div class="flex min-w-0 items-start gap-2">
-          <span class="mt-1.5 ${accentDotClsByIndex(i)}"></span>
-          <h4 class="min-w-0 text-base font-semibold leading-tight">${esc(c.name)}${code}</h4>
+      class="card card-interactive rise-in group relative cursor-pointer p-5">
+      <button data-action="del-course" data-id="${c.id}" data-name="${esc(c.name)}" title="Delete course" aria-label="Delete course ${esc(c.name)}"
+        class="icon-btn icon-btn-danger absolute right-3 top-3 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100">
+        ${trashIcon}
+      </button>
+      <div class="flex items-start gap-3 pr-9">
+        <span class="course-tile" style="${accentTileStyle(c.id)}">${esc(courseInitials(c.name))}</span>
+        <div class="min-w-0 pt-0.5">
+          <h4 class="min-w-0 truncate text-base font-semibold leading-snug">${esc(c.name)}</h4>
+          ${code}
         </div>
-        <button data-action="del-course" data-id="${c.id}" data-name="${esc(c.name)}" title="Delete course"
-          class="ml-2 shrink-0 rounded-md p-1 text-neutral-300 opacity-0 transition hover:bg-red-50 hover:text-red-600 group-hover:opacity-100">
-          ${trashIcon}
-        </button>
       </div>
       ${desc}
-      <div class="mt-3 flex items-center gap-2 text-xs text-neutral-400">
-        <span>${c.material_count} material${c.material_count === 1 ? '' : 's'}</span>
-        <span>·</span>
-        <span>${c.note_count} note${c.note_count === 1 ? '' : 's'}</span>
+      <div class="mt-4 flex flex-wrap items-center gap-2">
+        ${courseStatChip(statMaterialIcon, materials, `${materials} material${materials === 1 ? '' : 's'}`)}
+        ${courseStatChip(statConceptIcon, concepts, `${concepts} concept${concepts === 1 ? '' : 's'}`)}
+        ${courseStatChip(statNoteIcon, notes, `${notes} note${notes === 1 ? '' : 's'}`)}
       </div>
     </div>`;
 }
 
 function semesterBlock(sem, courses) {
   const body = courses.length
-    ? `<div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">${courses.map((c, i) => courseCard(c, i)).join('')}</div>`
-    : `<div class="mt-4 rounded-2xl border border-dashed border-neutral-200 p-6 text-center text-sm text-neutral-400">No courses yet — add one to get started.</div>`;
+    ? `<div class="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">${courses.map((c, i) => courseCard(c, i)).join('')}</div>`
+    : `<div class="dashed mt-5 flex flex-col items-center gap-3 p-8 text-center">
+        ${emptyCourseIcon}
+        <p class="text-sm text-muted">No courses yet in this semester.</p>
+        <button data-action="new-course" data-semester-id="${sem.id}" class="btn btn-secondary">+ New course</button>
+      </div>`;
   return `
     <section class="mb-10">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-2.5">
           <h3 class="text-lg font-semibold">${esc(sem.name)}</h3>
-          <span class="text-sm text-neutral-400">${sem.course_count} course${sem.course_count === 1 ? '' : 's'}</span>
-          <button data-action="archive-semester" data-id="${sem.id}" data-name="${esc(sem.name)}" title="Archive semester"
-            class="rounded-md px-1.5 py-0.5 text-xs font-medium text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700">Archive</button>
-          <button data-action="del-semester" data-id="${sem.id}" data-name="${esc(sem.name)}" title="Delete semester"
-            class="rounded-md p-1 text-neutral-300 hover:bg-red-50 hover:text-red-600">${trashIcon}</button>
+          <span class="chip chip-neutral">${sem.course_count} course${sem.course_count === 1 ? '' : 's'}</span>
+          <button data-action="archive-semester" data-id="${sem.id}" data-name="${esc(sem.name)}" title="Archive semester" class="icon-btn">${archiveIcon}</button>
+          <button data-action="del-semester" data-id="${sem.id}" data-name="${esc(sem.name)}" title="Delete semester" class="icon-btn icon-btn-danger">${trashIcon}</button>
         </div>
-        <button data-action="new-course" data-semester-id="${sem.id}"
-          class="rounded-lg border border-neutral-200 px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50">+ New course</button>
+        <button data-action="new-course" data-semester-id="${sem.id}" class="btn btn-secondary">+ New course</button>
       </div>
       ${body}
     </section>`;
@@ -104,22 +152,21 @@ function semesterBlock(sem, courses) {
 
 function archivedSemesterRow(sem) {
   return `
-    <div class="flex items-center justify-between rounded-xl border border-neutral-100 bg-neutral-50/60 px-4 py-2.5">
+    <div class="flex items-center justify-between rounded-xl px-4 py-2.5" style="background:var(--surface-2)">
       <div class="flex items-center gap-2">
-        <span class="text-sm font-medium text-neutral-500">${esc(sem.name)}</span>
-        <span class="text-xs text-neutral-400">${sem.course_count} course${sem.course_count === 1 ? '' : 's'}</span>
+        <span class="text-sm font-medium text-muted">${esc(sem.name)}</span>
+        <span class="text-xs text-subtle">${sem.course_count} course${sem.course_count === 1 ? '' : 's'}</span>
       </div>
-      <button data-action="unarchive-semester" data-id="${sem.id}" data-name="${esc(sem.name)}"
-        class="rounded-lg border border-neutral-200 bg-white px-2.5 py-1 text-xs font-medium text-neutral-600 hover:bg-neutral-50">Unarchive</button>
+      <button data-action="unarchive-semester" data-id="${sem.id}" data-name="${esc(sem.name)}" class="btn btn-secondary">Unarchive</button>
     </div>`;
 }
 
 function archivedSection(archived) {
   return `
-    <section class="mt-2 border-t border-neutral-100 pt-6">
-      <h3 class="text-sm font-medium text-neutral-400">Archived</h3>
+    <details class="mt-2 pt-6" style="border-top:1px solid var(--border)">
+      <summary class="cursor-pointer text-sm font-medium text-muted">Archived <span class="chip chip-neutral ml-1">${archived.length}</span></summary>
       <div class="mt-3 space-y-2">${archived.map(archivedSemesterRow).join('')}</div>
-    </section>`;
+    </details>`;
 }
 
 /* ---------- schedule (Build 2, Step 4): dashboard day-by-day agenda ---------- */
@@ -165,46 +212,126 @@ const doneCheckIcon =
   '<svg class="h-3.5 w-3.5 shrink-0 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">' +
   '<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>';
 
+// Drag-to-reschedule affordances (Build 12 Further Fixes): a small pin glyph
+// marks a lesson row/chip that carries a manual day override, and a
+// counter-clockwise "reset" arrow undoes it (DELETE /schedule/override).
+const movedPinIcon =
+  '<svg class="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">' +
+  '<path stroke-linecap="round" stroke-linejoin="round" d="M12 21s-6.5-5.6-6.5-11A6.5 6.5 0 0112 3.5a6.5 6.5 0 016.5 6.5c0 5.4-6.5 11-6.5 11z"/>' +
+  '<circle cx="12" cy="10" r="2" fill="currentColor" stroke="none"/></svg>';
+const resetMoveIcon =
+  '<svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>';
+
+// Quiz-performance "weak" indicator (Feature 2): matches the backend
+// scheduler's WEAK_THRESHOLD (services/scheduler.py) — a concept whose best
+// quiz score falls below this is scheduled earlier AND surfaces a small
+// amber "Review" pill here so it's visible why. Never shown once done.
+const LESSON_WEAK_THRESHOLD = 0.6;
+
 function lessonRow(item, i = 0) {
   const code = item.course_code
-    ? `<span class="ml-1.5 shrink-0 rounded-md bg-neutral-100 px-1.5 py-0.5 text-[10px] font-medium text-neutral-600 align-middle">${esc(item.course_code)}</span>`
+    ? `<span class="chip ${accentChipCls(item.course_id)} ml-1.5 shrink-0 !px-1.5 !py-0.5 align-middle" style="font-size:10px">${esc(item.course_code)}</span>`
     : '';
   const days = daysBetween(todayISO(), item.exam_date);
   const daysText = days === 0 ? 'today' : days === 1 ? 'in 1 day' : days > 1 ? `in ${days} days` : 'past';
   const dotCls = item.note_id ? 'bg-emerald-500' : 'bg-amber-400';
   const doneMark = item.done ? doneCheckIcon : '';
+  // Build 12 FF: a lesson with a manual day override (drag-to-reschedule, or
+  // still pinned after a regenerate) shows a "Moved" pill + a reset control
+  // that clears the override (DELETE /schedule/override) and snaps it back to
+  // its automatic day. Root element is a <div> (not <button>) so the reset
+  // control can be a real nested <button> — a nested <button> inside a
+  // <button> is invalid HTML (bit us before with note cards).
+  const movedMark = item.moved
+    ? `<span class="lesson-moved-pill" title="Moved — click reset to restore automatic day">${movedPinIcon}<span>Moved</span></span>`
+    : '';
+  const resetBtn = item.moved
+    ? `<button data-action="reset-schedule-move" data-exam-id="${item.exam_id != null ? item.exam_id : ''}" data-concept-id="${item.concept_id != null ? item.concept_id : ''}"
+        title="Reset to automatic day" class="lesson-reset-btn shrink-0">${resetMoveIcon}</button>`
+    : '';
+  // F5: compute weak WITHOUT the done gate for display purposes so a lesson
+  // marked done doesn't just lose its review cue outright — it's muted instead
+  // (still below the weak threshold, just no longer the active focus).
+  const weak = item.best_total > 0 && (item.best_score / item.best_total) < LESSON_WEAK_THRESHOLD;
+  const reviewMark = weak
+    ? `<span class="lesson-review-pill${item.done ? ' lesson-review-pill-done' : ''}" title="Best quiz score so far: ${item.best_score}/${item.best_total}">Review &middot; ${item.best_score}/${item.best_total}</span>`
+    : '';
   return `
-    <button data-action="open-schedule-lesson" data-item-id="${item.id}" data-course-id="${item.course_id}" data-concept-id="${item.concept_id != null ? item.concept_id : ''}"
-      style="${riseDelayStyle(i)};background:linear-gradient(135deg, color-mix(in srgb, var(--${accentKey(item.course_id)}) 11%, var(--surface)), var(--surface) 62%)"
-      class="card card-interactive rise-in flex w-full items-center gap-3 px-4 py-3 text-left">
+    <div data-action="open-schedule-lesson" data-item-id="${item.id}" data-course-id="${item.course_id}" data-concept-id="${item.concept_id != null ? item.concept_id : ''}" data-exam-id="${item.exam_id != null ? item.exam_id : ''}"
+      style="${riseDelayStyle(i)}"
+      class="card card-interactive dash-float rise-in flex w-full items-center gap-3 px-4 py-3 text-left">
       <span class="h-3 w-3 shrink-0 rounded-full ${dotCls}" style="box-shadow:0 0 9px 1px ${item.note_id ? 'var(--success)' : 'var(--warning)'}"></span>
       <div class="min-w-0 flex-1">
         <div class="flex min-w-0 items-center">
-          <span class="truncate text-sm text-neutral-500">${esc(item.course_name)}</span>${code}
+          <span class="truncate text-sm text-neutral-500">${esc(item.course_name)}</span>${code}${movedMark}
         </div>
         <div class="mt-0.5 flex min-w-0 items-center gap-1.5">
           <p class="min-w-0 truncate text-sm font-medium ${item.done ? 'text-neutral-400 line-through' : ''}">${esc(item.concept_name)}</p>
-          ${doneMark}
+          ${doneMark}${reviewMark}
         </div>
       </div>
       <div class="hidden shrink-0 text-right sm:block">
         <p class="truncate text-xs text-neutral-500">for ${esc(item.exam_name)}</p>
         <p class="mt-0.5 text-xs text-neutral-400">${daysText}</p>
       </div>
+      ${resetBtn}
+      ${chevronIcon}
+    </div>`;
+}
+
+// Small document icon distinguishing an "exam revision" row from a normal
+// lesson row everywhere schedule rows render (Build 12 Phase 4).
+const revisionDocIcon =
+  '<svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">' +
+  '<path stroke-linecap="round" stroke-linejoin="round" d="M7 3h7l5 5v12a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1z"/>' +
+  '<path stroke-linecap="round" stroke-linejoin="round" d="M14 3v5h5"/></svg>';
+
+// A synthetic schedule row for an upcoming exam's revision PDF (kind ===
+// 'revision' — see routers/schedule.py's _revision_rows). Deliberately styled
+// distinctly from lessonRow (dashed lilac border/icon, no concept dot) so it
+// reads as "exam revision", not a normal lesson; click opens the same
+// open-revision flow used by the analysis view.
+function revisionRow(item, i = 0) {
+  const code = item.course_code
+    ? `<span class="ml-1.5 shrink-0 rounded-md bg-neutral-100 px-1.5 py-0.5 text-[10px] font-medium text-neutral-600 align-middle">${esc(item.course_code)}</span>`
+    : '';
+  const ready = item.revision_status === 'compiled';
+  const generating = item.revision_status === 'generating';
+  const stateLabel = ready ? 'Ready ✓' : generating ? 'Preparing…' : 'Prepare';
+  const stateCls = ready ? 'text-emerald-600' : generating ? 'text-sky-600' : 'text-amber-600';
+  return `
+    <button data-action="open-revision" data-exam-id="${item.exam_id}" data-course-name="${esc(item.course_name)}" data-exam-name="${esc(item.exam_name)}"
+      style="${riseDelayStyle(i)};border:1px dashed color-mix(in srgb, var(--lilac) 50%, transparent)"
+      class="card card-interactive rise-in qa-revision-row flex w-full items-center gap-3 px-4 py-3 text-left">
+      <span class="shrink-0" style="color:var(--lilac)">${revisionDocIcon}</span>
+      <div class="min-w-0 flex-1">
+        <div class="flex min-w-0 items-center">
+          <span class="truncate text-sm text-neutral-500">${esc(item.course_name)}</span>${code}
+        </div>
+        <p class="mt-0.5 truncate text-sm font-medium">📄 Exam revision — ${esc(item.course_code || item.course_name)}</p>
+      </div>
+      <div class="hidden shrink-0 text-right sm:block">
+        <p class="truncate text-xs text-neutral-500">for ${esc(item.exam_name)} · ${fmtDate(item.study_date)}</p>
+        <p class="mt-0.5 text-xs font-semibold ${stateCls}">${stateLabel}</p>
+      </div>
       ${chevronIcon}
     </button>`;
 }
 
 function lessonList(items) {
-  return `<div class="flex w-full flex-col gap-3">${items.map((it, i) => lessonRow(it, i)).join('')}</div>`;
+  return `<div class="flex w-full flex-col gap-3">${items.map((it, i) => (it.kind === 'revision' ? revisionRow(it, i) : lessonRow(it, i))).join('')}</div>`;
 }
 
 function daySectionHtml(iso, items) {
   const body = items.length
     ? `<div class="mt-2">${lessonList(items)}</div>`
     : `<p class="mt-2 text-sm text-neutral-400">Nothing scheduled today.</p>`;
+  // data-day-drop (Build 12 FF): a drag-to-reschedule drop target — see
+  // dashDragPointerDown, which resolves the hovered target via
+  // document.elementFromPoint(...).closest('[data-day-drop]').
   return `
-    <section class="mt-6 first:mt-0">
+    <section class="mt-6 first:mt-0" data-day-drop="${iso}">
       <h3 class="text-sm font-semibold text-neutral-700">${fmtDayHeader(iso)}</h3>
       ${body}
     </section>`;
@@ -290,13 +417,33 @@ function calendarChip(item) {
     ? `<span class="shrink-0 opacity-70">${esc(item.course_code)}</span>`
     : '';
   const doneMark = item.done ? `<span class="shrink-0 text-emerald-500" title="Done">${doneCheckIcon}</span>` : '';
+  // A tiny "moved" dot (no reset control here — too cramped; reset from the
+  // list view). Chip stays draggable (Build 12 FF: drag onto another day cell).
+  const movedMark = item.moved
+    ? `<span class="calendar-chip-moved-dot" title="Moved — manually rescheduled"></span>`
+    : '';
   return `
-    <button data-action="open-schedule-lesson" data-item-id="${item.id}" data-course-id="${item.course_id}" data-concept-id="${item.concept_id != null ? item.concept_id : ''}" style="${accentContainerStyle(item.course_id)}"
+    <button data-action="open-schedule-lesson" data-item-id="${item.id}" data-course-id="${item.course_id}" data-concept-id="${item.concept_id != null ? item.concept_id : ''}" data-exam-id="${item.exam_id != null ? item.exam_id : ''}" style="${accentContainerStyle(item.course_id)}"
       class="card-interactive flex w-full items-center gap-1 truncate rounded-md px-1.5 py-0.5 text-left text-[11px] leading-tight">
       <span class="h-1.5 w-1.5 shrink-0 rounded-full ${dotCls}"></span>
       <span class="min-w-0 flex-1 truncate ${item.done ? 'line-through opacity-60' : ''}">${esc(item.concept_name)}</span>
+      ${movedMark}
       ${doneMark}
       ${code}
+    </button>`;
+}
+
+// Calendar-month equivalent of revisionRow: a compact, visually distinct chip
+// (dashed lilac border + doc glyph, no lesson dot) for a 'revision' row.
+function revisionChip(item) {
+  const ready = item.revision_status === 'compiled';
+  return `
+    <button data-action="open-revision" data-exam-id="${item.exam_id}" data-course-name="${esc(item.course_name)}" data-exam-name="${esc(item.exam_name)}"
+      style="background:var(--lilac-c);color:var(--on-lilac-c);border:1px dashed color-mix(in srgb, var(--lilac) 55%, transparent)"
+      class="card-interactive flex w-full items-center gap-1 truncate rounded-md px-1.5 py-0.5 text-left text-[11px] leading-tight">
+      <span class="shrink-0">📄</span>
+      <span class="min-w-0 flex-1 truncate">Revision · ${esc(item.course_code || item.course_name)}</span>
+      ${ready ? `<span class="shrink-0 text-emerald-600" title="Ready">${doneCheckIcon}</span>` : ''}
     </button>`;
 }
 
@@ -304,20 +451,25 @@ function calendarDayCell(iso, items, isCurrentMonth, isToday) {
   const dayNum = Number(iso.slice(-2));
   const visible = items.slice(0, CAL_MAX_CHIPS);
   const extra = items.length - visible.length;
+  // Visual fixes round: these used to be hardcoded Tailwind grays
+  // (border-neutral-100/50, bg-white/neutral-50, ring-neutral-800), which
+  // stayed light regardless of theme. Migrated to CSS-var arbitrary values so
+  // the calendar follows the same light/dark tokens as the rest of the app.
   const cellCls = [
     'flex min-h-[6.5rem] flex-col gap-1 rounded-lg border p-1.5',
-    isCurrentMonth ? 'border-neutral-100 bg-white' : 'border-neutral-50 bg-neutral-50/60',
-    isToday ? 'ring-2 ring-inset ring-neutral-800' : '',
+    isCurrentMonth ? 'bg-[var(--surface)] border-[var(--border)]' : 'bg-[var(--surface-2)] border-[var(--border)]',
+    isToday ? 'ring-2 ring-inset ring-[var(--primary)]' : '',
   ].join(' ');
   const numCls = isToday
-    ? 'inline-flex h-5 w-5 items-center justify-center rounded-full bg-neutral-800 text-[11px] font-semibold text-white'
-    : isCurrentMonth ? 'text-xs font-medium text-neutral-600' : 'text-xs font-medium text-neutral-300';
+    ? 'inline-flex h-5 w-5 items-center justify-center rounded-full bg-[var(--primary)] text-[11px] font-semibold text-[var(--on-primary)]'
+    : isCurrentMonth ? 'text-xs font-medium text-[var(--text-muted)]' : 'text-xs font-medium text-[var(--text-subtle)]';
+  // data-day-drop (Build 12 FF): same drop-target contract as daySectionHtml.
   return `
-    <div class="${cellCls}">
+    <div class="${cellCls}" data-day-drop="${iso}">
       <span class="${numCls}">${dayNum}</span>
       <div class="flex flex-col gap-1">
-        ${visible.map(calendarChip).join('')}
-        ${extra > 0 ? `<span class="px-1 text-[10px] text-neutral-400">+${extra} more</span>` : ''}
+        ${visible.map((it) => (it.kind === 'revision' ? revisionChip(it) : calendarChip(it))).join('')}
+        ${extra > 0 ? `<span class="px-1 text-[10px] text-[var(--text-subtle)]">+${extra} more</span>` : ''}
       </div>
     </div>`;
 }
@@ -342,7 +494,7 @@ function calendarGridHtml(monthStart, byDate) {
   }
   return `
     <div class="mt-3 overflow-x-auto">
-      <div class="min-w-[640px]">
+      <div class="min-w-[640px] rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] p-3">
         ${calendarWeekdayHeaderHtml()}
         <div class="mt-1 grid grid-cols-7 gap-1">${cells.join('')}</div>
       </div>
@@ -354,6 +506,13 @@ function calendarGridHtml(monthStart, byDate) {
 let scheduleHorizon = null; // module-level: preserved across re-renders (e.g. after regenerate)
 let dashboardView = 'list'; // 'list' | 'calendar' — module-level: preserved across re-renders
 let calendarMonth = null;   // ISO first-of-month string — module-level: preserved across re-renders
+
+// Build 12 FF: set true the instant a lesson-row/chip drag crosses the
+// threshold, consumed (and reset) by the document click handler so the
+// native click that follows a real drag+drop doesn't ALSO re-open the
+// lesson. Reset defensively at the start of every new drag gesture too, in
+// case a browser ever skips synthesizing that trailing click.
+let dashJustDragged = false;
 
 // Build 5, Step 2: one-time overdue catch-up. `dashCatchupChecked` is reset to
 // false only by route() right before it dispatches to a *fresh* dashboard entry
@@ -416,6 +575,23 @@ function playFadeSwap(el) {
   el.classList.add('fade-swap');
 }
 
+// G6: hides the List/Calendar toggle + the Show-through/.ics/Regenerate
+// controls when the list view's "nothing scheduled" empty state is showing
+// (so the empty card + its "Go to courses" CTA are the only things left);
+// shows them again once there's anything to manage. Calendar view has no
+// equivalent empty state — a single visible month being empty doesn't mean
+// the whole schedule is empty, and hiding the toggle there would strand the
+// user in an empty month with no way back to List — so the toolbar always
+// shows while in calendar view. Plain inline `style.display` (not a `hidden`
+// class) so it can't lose a specificity fight with `#dash-actions`' own
+// `flex` utility class.
+function setDashToolbarVisible(visible) {
+  const toggleHost = document.getElementById('dash-view-toggle');
+  const actionsHost = document.getElementById('dash-actions');
+  if (toggleHost) toggleHost.style.display = visible ? '' : 'none';
+  if (actionsHost) actionsHost.style.display = visible ? '' : 'none';
+}
+
 // Fills #dash-content ONLY (list agenda or calendar month grid, whichever
 // dashboardView currently is) — never touches the greeting/toggle/actions
 // header above it, so switching views or paging the calendar never scrolls
@@ -425,6 +601,7 @@ async function renderDashContent() {
   if (!host) return;
   const today = todayISO();
   let bodyHtml;
+  let isEmpty = false; // list view's "nothing scheduled" state — see setDashToolbarVisible
 
   if (dashboardView === 'calendar') {
     const monthStart = calendarMonth;
@@ -451,6 +628,7 @@ async function renderDashContent() {
     upcoming.forEach((it) => { (byDate[it.study_date] = byDate[it.study_date] || []).push(it); });
 
     if (!upcoming.length) {
+      isEmpty = true;
       bodyHtml = `
         <div class="mt-4 dashed p-8 text-center text-sm">
           No study plan yet. Add exams to your courses, then click Regenerate schedule.
@@ -470,6 +648,7 @@ async function renderDashContent() {
 
   host.innerHTML = bodyHtml;
   playFadeSwap(host);
+  setDashToolbarVisible(dashboardView === 'list' ? !isEmpty : true);
 }
 
 // Switches list<->calendar in place: repaints the toggle + actions slots
@@ -525,14 +704,270 @@ async function renderDashboard() {
     <div id="dash-content"></div>`;
 
   wireDashActions();
+  wireDashDrag();
   await renderDashContent();
+}
+
+/* ---------- dashboard drag-to-reschedule (Build 12 Further Fixes) ----------
+   Grab a lesson row (list view) or chip (calendar view) and drop it on a
+   different day to pin it there — PATCH /schedule/move {exam_id, concept_id,
+   study_date} (durable; survives the next regenerate); a "Moved" pill +
+   reset control (see lessonRow) undoes it via DELETE /schedule/override.
+   Modeled on canvasWireItemInteraction's pointerdown → threshold → ghost
+   pattern, but listens on `document` for move/up (not the row itself) so a
+   fast drag that leaves the row's bounds before the threshold is crossed is
+   never lost, and deliberately never calls setPointerCapture/preventDefault
+   on pointerdown — a plain click (no threshold crossed) is left completely
+   alone so the existing 'open-schedule-lesson' click handler still opens the
+   lesson. Wired once per fresh #dash-content mount: renderDashboard() always
+   recreates that host div (view.innerHTML = ...), so the old element (and
+   its listener) is garbage-collected — no listener pile-up across renders. */
+const DASH_DRAG_THRESHOLD = 4;
+
+function wireDashDrag() {
+  const host = document.getElementById('dash-content');
+  if (!host) return;
+  host.addEventListener('pointerdown', dashDragPointerDown);
+}
+
+function dashDragPointerDown(e) {
+  if (e.button !== 0) return;
+  // Never start a drag from the reset control — let its own click fire.
+  if (e.target.closest('[data-action="reset-schedule-move"]')) return;
+  const row = e.target.closest('[data-action="open-schedule-lesson"]');
+  if (!row) return; // not a lesson row/chip (e.g. a revision row/chip — never draggable)
+  const examId = row.dataset.examId;
+  const conceptId = row.dataset.conceptId;
+  if (!examId || !conceptId) return; // no stable (exam_id, concept_id) move identity
+
+  dashJustDragged = false; // defensive reset in case a prior drag's click never fired
+
+  const fromCell = row.closest('[data-day-drop]');
+  const fromIso = fromCell ? fromCell.dataset.dayDrop : null;
+  const startX = e.clientX, startY = e.clientY;
+  const rect = row.getBoundingClientRect();
+  const offsetX = startX - rect.left, offsetY = startY - rect.top;
+
+  let dragging = false;
+  let ghost = null;
+  let hoverTarget = null;
+
+  const setHover = (target) => {
+    if (target === hoverTarget) return;
+    if (hoverTarget) hoverTarget.classList.remove('drop-target-active');
+    if (target) target.classList.add('drop-target-active');
+    hoverTarget = target;
+  };
+
+  const onMove = (ev) => {
+    const dx = ev.clientX - startX, dy = ev.clientY - startY;
+    if (!dragging) {
+      if (Math.abs(dx) < DASH_DRAG_THRESHOLD && Math.abs(dy) < DASH_DRAG_THRESHOLD) return;
+      dragging = true;
+      dashJustDragged = true;
+      ghost = document.createElement('div');
+      ghost.className = 'dash-drag-ghost';
+      ghost.style.width = rect.width + 'px';
+      ghost.style.height = rect.height + 'px';
+      ghost.innerHTML = row.innerHTML;
+      document.body.appendChild(ghost);
+      row.classList.add('dash-row-source-dragging');
+      document.body.classList.add('dash-dragging-active');
+    }
+    ev.preventDefault();
+    ghost.style.left = (ev.clientX - offsetX) + 'px';
+    ghost.style.top = (ev.clientY - offsetY) + 'px';
+    const el = document.elementFromPoint(ev.clientX, ev.clientY);
+    setHover(el ? el.closest('[data-day-drop]') : null);
+  };
+
+  const finish = async () => {
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    document.removeEventListener('pointercancel', onCancel);
+    const target = hoverTarget;
+    const wasDragging = dragging;
+    setHover(null);
+    if (ghost) { ghost.remove(); ghost = null; }
+    row.classList.remove('dash-row-source-dragging');
+    document.body.classList.remove('dash-dragging-active');
+    if (!wasDragging) return; // plain click — the native click event opens the lesson as usual
+    const toIso = target ? target.dataset.dayDrop : null;
+    if (!toIso || toIso === fromIso) return; // dropped outside any day, or back onto the same day — no-op
+    try {
+      await api.patch('/schedule/move', { exam_id: +examId, concept_id: +conceptId, study_date: toIso });
+      ui.toast('Moved to ' + fmtDate(toIso));
+      // Optimistic single-row relocation (Further Fixes): the PATCH already
+      // persisted the move server-side, so the old `await renderDashContent()`
+      // here was a full re-fetch + #dash-content rebuild just to move ONE row
+      // — every other row lost DOM identity and fade-replayed for no reason.
+      // Re-parent just the dragged node instead; fall back to a full render
+      // only if the target day isn't currently rendered in the DOM at all
+      // (e.g. a future empty day renderDashContent() skips entirely) so a
+      // move never silently no-ops.
+      // Trade-off (intentional): the backend regenerates the WHOLE semester's
+      // schedule on a move, so other rows could in theory shift slightly too
+      // — we deliberately relocate only the dragged row, per the user's
+      // request; any drift reconciles on the next natural full render (view
+      // toggle, horizon change, calendar nav, or reload).
+      const moved = dashRelocateRow(row, toIso, fromIso);
+      if (!moved) await renderDashContent();
+    } catch (err) { ui.toast(err.message, 'error'); }
+  };
+
+  const onUp = () => { finish(); };
+  const onCancel = () => { dragging = false; finish(); };
+
+  document.addEventListener('pointermove', onMove);
+  document.addEventListener('pointerup', onUp);
+  document.addEventListener('pointercancel', onCancel);
+}
+
+// Relocates ONE dragged lesson row (list view) or chip (calendar view) to its
+// new day in the live DOM, instead of re-fetching + rebuilding #dash-content.
+// Returns true on success; false means the caller should fall back to a full
+// renderDashContent() (target day not currently rendered).
+function dashRelocateRow(row, toIso, fromIso) {
+  return dashboardView === 'calendar'
+    ? dashRelocateChip(row, toIso, fromIso)
+    : dashRelocateListRow(row, toIso, fromIso);
+}
+
+function dashRelocateListRow(row, toIso, fromIso) {
+  const host = document.getElementById('dash-content');
+  if (!host) return false;
+  const targetSection = host.querySelector(`[data-day-drop="${toIso}"]`);
+  if (!targetSection) return false; // e.g. a future day with nothing scheduled isn't rendered at all
+
+  let targetList = targetSection.querySelector('.flex.w-full.flex-col.gap-3');
+  if (!targetList) {
+    // Target day currently shows the "Nothing scheduled" placeholder — swap
+    // it for a real list wrapper (mirrors daySectionHtml's non-empty branch).
+    const placeholder = targetSection.querySelector(':scope > p');
+    const wrap = document.createElement('div');
+    wrap.className = 'mt-2';
+    targetList = document.createElement('div');
+    targetList.className = 'flex w-full flex-col gap-3';
+    wrap.appendChild(targetList);
+    if (placeholder) placeholder.replaceWith(wrap);
+    else targetSection.appendChild(wrap);
+  }
+
+  dashMarkRowMoved(row);
+  targetList.appendChild(row); // re-parents the existing node (removes it from its old parent)
+  row.style.animationDelay = '0ms'; // ignore its original entrance stagger index
+  playRiseIn(row);
+
+  const fromSection = fromIso ? host.querySelector(`[data-day-drop="${fromIso}"]`) : null;
+  if (fromSection) {
+    const fromList = fromSection.querySelector('.flex.w-full.flex-col.gap-3');
+    if (fromList && !fromList.children.length) {
+      if (fromIso === todayISO()) {
+        // Today's section always renders (even empty) — swap back to the
+        // placeholder text instead of removing the section.
+        const wrap = fromList.closest('.mt-2') || fromList;
+        const placeholder = document.createElement('p');
+        placeholder.className = 'mt-2 text-sm text-neutral-400';
+        placeholder.textContent = 'Nothing scheduled today.';
+        wrap.replaceWith(placeholder);
+      } else {
+        fromSection.remove(); // renderDashContent() never renders an empty non-today section either
+      }
+    }
+  }
+  return true;
+}
+
+// Adds the "Moved" pill + reset control to a lesson row that doesn't have
+// them yet (first time this row is dragged) — exact markup from lessonRow().
+function dashMarkRowMoved(row) {
+  if (row.querySelector('.lesson-moved-pill')) return; // already marked (e.g. a second drag)
+  const examId = row.dataset.examId || '';
+  const conceptId = row.dataset.conceptId || '';
+  const headerLine = row.querySelector('.flex.min-w-0.items-center');
+  if (headerLine) {
+    headerLine.insertAdjacentHTML('beforeend',
+      `<span class="lesson-moved-pill" title="Moved — click reset to restore automatic day">${movedPinIcon}<span>Moved</span></span>`);
+  }
+  const chevron = row.lastElementChild; // chevronIcon <svg>, always the final child (see lessonRow)
+  const resetHtml = `<button data-action="reset-schedule-move" data-exam-id="${examId}" data-concept-id="${conceptId}"
+        title="Reset to automatic day" class="lesson-reset-btn shrink-0">${resetMoveIcon}</button>`;
+  if (chevron) chevron.insertAdjacentHTML('beforebegin', resetHtml);
+  else row.insertAdjacentHTML('beforeend', resetHtml);
+}
+
+function dashRelocateChip(chip, toIso, fromIso) {
+  const host = document.getElementById('dash-content');
+  if (!host) return false;
+  const targetCell = host.querySelector(`[data-day-drop="${toIso}"]`);
+  const targetList = targetCell ? targetCell.querySelector('.flex.flex-col.gap-1') : null;
+  if (!targetList) return false;
+
+  if (!chip.querySelector('.calendar-chip-moved-dot')) {
+    const dot = document.createElement('span');
+    dot.className = 'calendar-chip-moved-dot';
+    dot.title = 'Moved — manually rescheduled';
+    const nameSpan = chip.children[1]; // [dot, name, ...] — see calendarChip()
+    if (nameSpan) nameSpan.insertAdjacentElement('afterend', dot);
+    else chip.appendChild(dot);
+  }
+
+  targetList.appendChild(chip); // re-parents the existing node
+  playRiseIn(chip);
+  dashRecomputeCellOverflow(targetCell);
+
+  const fromCell = fromIso ? host.querySelector(`[data-day-drop="${fromIso}"]`) : null;
+  if (fromCell) dashRecomputeCellOverflow(fromCell);
+  return true;
+}
+
+// Calendar cells cap visible chips at CAL_MAX_CHIPS + a "+N more" label
+// (calendarDayCell) — re-derive both after moving a chip in or out of a cell.
+// Chips are always <button>s and the overflow label the only <span>, so
+// they're easy to tell apart without re-fetching the day's full item list.
+function dashRecomputeCellOverflow(cell) {
+  const list = cell.querySelector('.flex.flex-col.gap-1');
+  if (!list) return;
+  const chips = Array.from(list.children).filter((el) => el.tagName === 'BUTTON');
+  chips.forEach((el, i) => { el.style.display = i < CAL_MAX_CHIPS ? '' : 'none'; });
+  const extra = chips.length - CAL_MAX_CHIPS;
+  let overflow = list.querySelector(':scope > span');
+  if (extra > 0) {
+    if (!overflow) {
+      overflow = document.createElement('span');
+      overflow.className = 'px-1 text-[10px] text-[var(--text-subtle)]';
+      list.appendChild(overflow);
+    }
+    overflow.textContent = `+${extra} more`;
+  } else if (overflow) {
+    overflow.remove();
+  }
+}
+
+// Replays the `rise-in` entrance keyframe on a single just-relocated element
+// (a plain classList.add would be a no-op if the class is already present) —
+// gives the moved row/chip a brief settle animation without touching or
+// fading anything else in the list.
+function playRiseIn(el) {
+  if (!el) return;
+  el.classList.remove('rise-in');
+  void el.offsetWidth; // force reflow so the animation restarts
+  el.classList.add('rise-in');
+}
+
+async function resetScheduleMove(examId, conceptId) {
+  try {
+    await api.del('/schedule/override', { exam_id: +examId, concept_id: +conceptId });
+    ui.toast('Reset to automatic day');
+    await renderDashContent();
+  } catch (e) { ui.toast(e.message, 'error'); }
 }
 
 /* ---------- courses view (Build 2, Step 4): semester/course management ---------- */
 
 async function renderCourses() {
   const view = document.getElementById('view');
-  view.innerHTML = '<p class="text-sm text-neutral-400">Loading…</p>';
+  view.innerHTML = '<p class="text-sm text-subtle">Loading…</p>';
   const [allSemesters, courses] = await Promise.all([
     api.get('/semesters?include_archived=1'),
     api.get('/courses'),
@@ -541,21 +976,20 @@ async function renderCourses() {
   const archived = allSemesters.filter((s) => s.archived);
 
   let html = `
-    <div class="mb-8 flex items-center justify-between">
+    <div class="mb-8 flex flex-wrap items-center justify-between gap-3">
       <div>
         <h2 class="text-2xl font-semibold tracking-tight">Courses</h2>
-        <p class="text-sm text-neutral-500">Your term, in one place.</p>
+        <p class="mt-1 text-sm text-muted">Your term, in one place.</p>
       </div>
-      <button data-action="new-semester"
-        class="rounded-lg bg-ink px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800">+ New semester</button>
+      <button data-action="new-semester" class="btn btn-primary">+ New semester</button>
     </div>`;
 
   if (!semesters.length) {
     html += `
-      <div class="rounded-2xl border border-dashed border-neutral-200 p-12 text-center">
-        <p class="text-neutral-500">No semesters yet.</p>
-        <button data-action="new-semester"
-          class="mt-4 rounded-lg bg-ink px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800">Create your first semester</button>
+      <div class="dashed flex flex-col items-center gap-3 p-12 text-center">
+        ${emptyCourseIcon}
+        <p class="text-sm text-muted">No semesters yet.</p>
+        <button data-action="new-semester" class="btn btn-primary">Create your first semester</button>
       </div>`;
   } else {
     const byId = {};
@@ -587,17 +1021,32 @@ function emptyList(msg) {
   return `<p class="px-1 py-2 text-xs text-neutral-400">${msg}</p>`;
 }
 
+// Office (docx/pptx/doc/ppt) uploads convert to PDF in the background
+// (Feature 3) — status is 'converting' while that's in flight, 'failed' with
+// a visible reason if it errors, 'ready'/legacy-null otherwise (no badge).
+function materialStatusBadge(m) {
+  if (m.status === 'converting') {
+    return `<span class="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium" style="background:var(--surface-2);color:var(--text-muted)">
+      <span class="h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-500"></span>Converting&hellip;</span>`;
+  }
+  if (m.status === 'failed') {
+    return `<span class="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium" style="background:var(--danger-c);color:var(--danger)" title="${esc(m.error_message || 'Conversion failed')}">Failed</span>`;
+  }
+  return '';
+}
+
 function materialRow(m) {
   return `
     <div class="group flex items-center justify-between gap-2 rounded-lg border border-neutral-100 px-3 py-2">
       <div class="flex min-w-0 items-center gap-2">
         ${docIcon}
         <span class="truncate text-sm">${esc(m.display_name)}</span>
+        ${materialStatusBadge(m)}
       </div>
       <div class="flex shrink-0 items-center gap-2">
         <span class="text-xs text-neutral-400">${fmtSize(m.size_bytes)}</span>
-        <button data-action="del-material" data-id="${m.id}" title="Remove"
-          class="rounded-md p-1 text-neutral-300 opacity-0 transition hover:bg-red-50 hover:text-red-600 group-hover:opacity-100">${trashIcon}</button>
+        <button data-action="del-material" data-id="${m.id}" title="Remove" aria-label="Remove ${esc(m.display_name)}"
+          class="rounded-md p-1 text-neutral-300 opacity-0 transition hover:bg-red-50 hover:text-red-600 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100">${trashIcon}</button>
       </div>
     </div>`;
 }
@@ -607,24 +1056,42 @@ function uploadPanel(kind, title, subtitle) {
     <div class="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
       <h3 class="font-semibold">${title}</h3>
       <p class="text-xs text-neutral-500">${subtitle}</p>
-      <div id="drop-${kind}"
+      <div id="drop-${kind}" tabindex="0" role="button" aria-label="Upload files: drag and drop, or press Enter to browse"
         class="mt-4 cursor-pointer rounded-xl border-2 border-dashed border-neutral-200 p-6 text-center transition hover:border-neutral-300">
         <p class="text-sm text-neutral-500">Drop PDFs or images here, or <span class="font-medium text-neutral-700">browse</span></p>
-        <p class="mt-1 text-xs text-neutral-400">PDF, PNG, JPG, WEBP · up to 50 MB</p>
-        <input id="input-${kind}" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" multiple class="hidden" />
+        <p class="mt-1 text-xs text-neutral-400">PDF, PNG, JPG, WEBP, Word, PowerPoint &middot; up to 50 MB</p>
+        <input id="input-${kind}" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.ppt,.pptx" multiple class="hidden" />
       </div>
       <div id="up-status-${kind}" class="mt-3 space-y-1"></div>
       <div id="list-${kind}" class="mt-3 space-y-1"></div>
     </div>`;
 }
 
-function fillMaterialLists(materials) {
+// Timer polling the materials list every ~2s while any material is still
+// 'converting' (office docx/pptx uploads convert in the background) — mirrors
+// the canvas view's converting-poll pattern. courseId is threaded through so
+// the poll can refresh the right course even if the user is mid-navigation;
+// stopped whenever nothing is converting or the course view is left (route()).
+let materialsPollTimer = null;
+function stopMaterialsPolling() {
+  if (materialsPollTimer) { clearTimeout(materialsPollTimer); materialsPollTimer = null; }
+}
+
+function fillMaterialLists(materials, courseId) {
   const mats = materials.filter((m) => m.kind === 'material');
   const pyqs = materials.filter((m) => m.kind === 'pyq');
   const lm = document.getElementById('list-material');
   const lp = document.getElementById('list-pyq');
   if (lm) lm.innerHTML = mats.length ? mats.map(materialRow).join('') : emptyList('No study materials yet.');
   if (lp) lp.innerHTML = pyqs.length ? pyqs.map(materialRow).join('') : emptyList('No past questions yet.');
+
+  stopMaterialsPolling();
+  const anyConverting = materials.some((m) => m.status === 'converting');
+  if (anyConverting && courseId) {
+    materialsPollTimer = setTimeout(async () => {
+      try { await refreshMaterials(courseId); } catch (_) { /* course likely left — just stop */ }
+    }, 2000);
+  }
 }
 
 async function renderCourse(id) {
@@ -663,7 +1130,7 @@ async function renderCourse(id) {
     <div id="concepts-section" class="mt-4"></div>
     <div id="exams-section" class="mt-10"></div>
     <div id="course-plan-section" class="mt-10"></div>`;
-  fillMaterialLists(materials);
+  fillMaterialLists(materials, id);
   wireUploads(id);
   loadStudyArea(id);
   loadExamsSection(id);
@@ -719,16 +1186,33 @@ const dashed = (msg) => `<div class="mt-4 rounded-2xl border border-dashed borde
 const errorBox = (msg) => `<div class="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">${msg}</div>`;
 
 function conceptCard(c, i = 0) {
-  let src = '';
-  try { src = (JSON.parse(c.source_locations || '{}').source) || ''; } catch (_) { /* ignore */ }
+  // Source line = the file the concept came from + the page/location string.
+  // The file name comes from source_file (joined from the material via
+  // material_id in list_concepts); the pages come from source_locations.source.
+  // Depending on the extraction, the model sometimes ALREADY names the file
+  // inside the source string ("lecture.pdf, Pages 8-10") and sometimes gives
+  // pages only ("Pages 14-17"). Show the file once: prepend it only when the
+  // pages string doesn't already contain it. Result e.g. "lecture.pdf — Pages 8-10".
+  let pages = '';
+  try { pages = (JSON.parse(c.source_locations || '{}').source) || ''; } catch (_) { /* ignore */ }
+  const file = (c.source_file || '').trim();
+  const srcLine = (file && pages && pages.toLowerCase().includes(file.toLowerCase()))
+    ? esc(pages)
+    : [file, pages].filter(Boolean).map(esc).join(' — ');
+  // F4: per-concept rename/delete — hidden until hover/keyboard-focus, mirrors
+  // courseCard's group-hover/group-focus-within/focus-visible reveal pattern.
   return `
-    <div class="card p-4">
-      <div class="flex items-start gap-2">
+    <div class="card group relative p-4">
+      <div class="absolute right-2 top-2 flex items-center gap-0.5 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100">
+        <button data-action="rename-concept" data-id="${c.id}" data-name="${esc(c.name)}" title="Rename concept" aria-label="Rename concept ${esc(c.name)}" class="icon-btn">${renameIcon}</button>
+        <button data-action="del-concept" data-id="${c.id}" data-name="${esc(c.name)}" title="Delete concept" aria-label="Delete concept ${esc(c.name)}" class="icon-btn icon-btn-danger">${trashIcon}</button>
+      </div>
+      <div class="flex items-start gap-2 pr-20">
         <span class="mt-1.5 ${accentDotClsByIndex(i)}"></span>
         <h4 class="min-w-0 font-semibold leading-tight">${esc(c.name)}</h4>
       </div>
       <p class="mt-1 text-sm text-neutral-600">${esc(c.summary || '')}</p>
-      ${src ? `<p class="mt-2 text-xs text-neutral-400">${esc(src)}</p>` : ''}
+      ${srcLine ? `<p class="mt-2 text-xs text-neutral-400">${srcLine}</p>` : ''}
     </div>`;
 }
 
@@ -821,12 +1305,13 @@ async function loadStudyArea(courseId) {
   stopJobPolling();
   const host = document.getElementById('concepts-section');
   if (!host) return;
-  let job = null, concepts = [], notes = [], course = null, sp = { prompts: [], active_prompt_id: null };
+  let job = null, concepts = [], notes = [], materials = [], course = null, sp = { prompts: [], active_prompt_id: null };
   try {
-    [job, concepts, notes] = await Promise.all([
+    [job, concepts, notes, materials] = await Promise.all([
       api.get(`/courses/${courseId}/job`),
       api.get(`/courses/${courseId}/concepts`),
       api.get(`/courses/${courseId}/notes`),
+      api.get(`/courses/${courseId}/materials`),
     ]);
   } catch (_) { /* render what we have */ }
   try {
@@ -849,12 +1334,18 @@ async function loadStudyArea(courseId) {
   const canceling = String(cancelingCourseId) === String(courseId);
 
   // Concepts
+  // F6: with zero study materials uploaded (PYQs don't count — they never
+  // feed extraction), "Analyze materials" would just 400 from the backend
+  // ("Upload materials first") — disable it up front with a clear tooltip
+  // instead of letting the user hit that error. Only gates the EMPTY-state
+  // button; "Analyze new materials" (concepts already exist) is untouched.
+  const noStudyMaterials = materials.filter((m) => m.kind === 'material').length === 0;
   const conceptsHeaderAction = concepts.length
     ? `<div class="flex items-center gap-2">
         <button data-action="reanalyze-all" data-id="${courseId}" ${running ? 'disabled' : ''} class="rounded-lg px-3 py-1.5 text-sm font-medium text-neutral-500 hover:bg-neutral-100">Re-analyze all</button>
         <button data-action="generate" data-id="${courseId}" ${running ? 'disabled' : ''} class="${btnSecondary}">Analyze new materials</button>
       </div>`
-    : `<button data-action="generate" data-id="${courseId}" ${running ? 'disabled' : ''} class="${btnSecondary}">Analyze materials</button>`;
+    : `<button data-action="generate" data-id="${courseId}" ${running || noStudyMaterials ? 'disabled' : ''} class="${btnSecondary}"${noStudyMaterials ? ' title="Upload study materials first"' : ''}>Analyze materials</button>`;
   let html = sectionHeader('Concepts', 'What Axiom will turn into notes.', conceptsHeaderAction);
   if (running && job.type === 'extract') html += progressCard(job, courseId);
   else if (failed && job.type === 'extract') html += errorBox(`Analysis failed: ${esc(job.message || 'unknown error')}`) + (concepts.length ? conceptsGrid(concepts) : '');
@@ -873,10 +1364,18 @@ async function loadStudyArea(courseId) {
     const enhKeys = parseEnhancements(course && course.note_enhancements);
     const hasInstr = !!(course && (course.note_instructions || '').trim());
     const customized = hasInstr || enhKeys.length > 0;
-    const chooseBtn = `<button data-action="choose-notes" data-id="${courseId}" ${running ? 'disabled' : ''} class="rounded-lg px-3 py-1.5 text-sm font-medium text-neutral-500 hover:bg-neutral-100">Choose…</button>`;
+    const chooseBtn = `<button data-action="choose-notes" data-id="${courseId}" ${running ? 'disabled' : ''} class="rounded-lg px-3 py-1.5 text-sm font-medium text-neutral-500 hover:bg-neutral-100">Select concepts…</button>`;
+    // B5: "Regenerate all" was fully wired (confirmRegenAll + the regen-all
+    // dispatcher branch) but no button ever rendered it — mirrors how the
+    // Concepts header pairs its muted "Re-analyze all" next to the primary
+    // action, so the reset-and-rebuild path is reachable without deleting the
+    // course.
+    const regenAllBtn = notes.length
+      ? `<button data-action="regen-all" data-id="${courseId}" ${running ? 'disabled' : ''} class="rounded-lg px-3 py-1.5 text-sm font-medium text-neutral-500 hover:bg-neutral-100">Regenerate all</button>`
+      : '';
     const genNotesBtn = `<button data-action="gen-notes" data-id="${courseId}" ${running ? 'disabled' : ''} class="${btnPrimary}">${notes.length ? 'Generate new notes' : 'Generate notes'}</button>`;
     html += sectionHeader('Notes', 'One compiled PDF per concept.',
-      `<div class="flex items-center gap-2">${studyBtn}${downloadAllBtn}<button data-action="note-customize" data-id="${courseId}" class="${btnSecondary}">Customize${customized ? ' ✓' : ''}</button>${chooseBtn}${genNotesBtn}</div>`, 'mt-12');
+      `<div class="flex items-center gap-2">${studyBtn}${downloadAllBtn}<button data-action="note-customize" data-id="${courseId}" class="${btnSecondary}">Customize${customized ? ' ✓' : ''}</button>${regenAllBtn}${chooseBtn}${genNotesBtn}</div>`, 'mt-12');
     if (customized) {
       const parts = enhKeys.map(enhLabel).map(esc);
       if (hasInstr) parts.push('custom instruction');
@@ -900,6 +1399,42 @@ async function loadStudyArea(courseId) {
   // retried note's spinner would never flip to compiled/failed on its own.
   const anyNoteGenerating = notes.some((n) => n.status === 'generating');
   if (running || anyNoteGenerating) jobPollTimer = setTimeout(() => loadStudyArea(courseId), 2000);
+}
+
+// F4: per-concept rename — same endpoint/field the canvas's lesson-rename
+// pencil already uses (PATCH /concepts/:id, {display_name}), which also
+// updates the note's title server-side. Refreshes the concepts/notes area in
+// place; the course id comes from the hash since conceptCard only ever
+// renders on the course page.
+function renameConcept(id, name) {
+  ui.formModal({
+    title: 'Rename concept',
+    submitLabel: 'Save',
+    bodyHtml: field('Name', `<input id="f-concept-rename" class="${inputCls}" value="${esc(name || '')}" />`),
+    onSubmit: async (root) => {
+      const newName = root.querySelector('#f-concept-rename').value.trim();
+      if (!newName) throw new Error('Please enter a name.');
+      await api.patch(`/concepts/${id}`, { display_name: newName });
+      ui.toast('Renamed');
+      const courseId = currentCourseIdFromHash();
+      if (courseId) await loadStudyArea(courseId);
+    },
+  });
+}
+
+// F4: per-concept delete — DANGER-toned confirm (deletes only this concept's
+// own note/quiz/progress/links/canvas rows server-side; siblings untouched).
+function delConcept(id, name) {
+  ui.confirmModal({
+    title: 'Delete concept?',
+    message: `"${name}" and its note, quiz, and progress will be permanently removed. Other concepts in this course are not affected.`,
+    onConfirm: async () => {
+      await api.del(`/concepts/${id}`);
+      ui.toast('Concept deleted');
+      const courseId = currentCourseIdFromHash();
+      if (courseId) await loadStudyArea(courseId);
+    },
+  });
 }
 
 async function retryNote(noteId) {
@@ -1045,16 +1580,33 @@ async function noteConceptPicker(courseId) {
         <button data-sel="none" class="link">Clear</button>
       </div>
       <div class="mt-3 max-h-72 space-y-0.5 overflow-y-auto">${rows}</div>
+      <p id="np-warn" class="mt-2 hidden text-xs font-medium" style="color:var(--warning, #b45309)"></p>
       <div class="mt-4 flex justify-end gap-2">
         <button data-cancel class="btn btn-ghost">Cancel</button>
         <button data-gen class="btn btn-primary">Generate selected</button>
       </div>
     </div>`);
   const boxes = () => Array.from(card.querySelectorAll('input[data-cid]'));
+  // B10: warn (inline, live) when the current selection would REGENERATE
+  // concepts that already have a compiled note — "Select all" is easy to hit
+  // expecting it only fills gaps.
+  const warnEl = card.querySelector('#np-warn');
+  const updateWarn = () => {
+    const replacing = boxes().filter((x) => x.checked && noteByConcept.has(Number(x.dataset.cid))).length;
+    if (replacing > 0) {
+      warnEl.textContent = `${replacing} existing note${replacing === 1 ? '' : 's'} will be regenerated (replaced).`;
+      warnEl.classList.remove('hidden');
+    } else {
+      warnEl.classList.add('hidden');
+    }
+  };
   card.querySelectorAll('[data-sel]').forEach((b) => b.addEventListener('click', () => {
     const mode = b.dataset.sel;
     boxes().forEach((x) => { x.checked = mode === 'all' ? true : mode === 'none' ? false : !noteByConcept.has(Number(x.dataset.cid)); });
+    updateWarn();
   }));
+  boxes().forEach((x) => x.addEventListener('change', updateWarn));
+  updateWarn();
   card.querySelector('[data-cancel]').addEventListener('click', close);
   card.querySelector('[data-gen]').addEventListener('click', () => {
     const ids = boxes().filter((x) => x.checked).map((x) => Number(x.dataset.cid));
@@ -1127,6 +1679,27 @@ async function toggleDone(conceptId, wasDone) {
     document.querySelectorAll(`[data-done-variant][data-concept-id="${conceptId}"]`).forEach((btn) => {
       btn.outerHTML = doneToggleBtn(conceptId, nowDone, btn.dataset.doneVariant);
     });
+    // B1: also patch the in-memory caches these three views read from, so
+    // switching lessons/notes and back can't show a reverted `done` — before
+    // this fix only the DOM was patched, and every view rebuilds its markup
+    // from these cached objects on the next render (e.g. canvasSwitchLesson /
+    // studySelectNote / schedSelect), which would silently undo the toggle.
+    // `conceptId` arrives as a string (data-concept-id) — compare numerically.
+    const cid = Number(conceptId);
+    if (canvasState && canvasState.notesByConceptId) {
+      const n = canvasState.notesByConceptId.get(cid);
+      if (n) n.done = nowDone;
+      if (canvasState.concept && Number(canvasState.concept.id) === cid && canvasState.note) {
+        canvasState.note.done = nowDone;
+      }
+    }
+    if (studyState && Array.isArray(studyState.notes)) {
+      const n = studyState.notes.find((x) => x.concept_id === cid);
+      if (n) n.done = nowDone;
+    }
+    if (schedStudy && Array.isArray(schedStudy.items)) {
+      schedStudy.items.forEach((it) => { if (it.concept_id === cid) it.done = nowDone; });
+    }
   } catch (e) { ui.toast(e.message, 'error'); }
 }
 
@@ -1531,36 +2104,18 @@ async function loadCoursePlan(courseId) {
   host.innerHTML = html;
 }
 
-/* ---------- quiz prefetch (Build 3 Further-Fixes, Step 3) ----------
-   Fired whenever a lesson becomes the active one in either study view, so the
-   quiz is (usually) already generated by the time the student clicks "Start
-   Quiz". Cached: a quiz that's already ready/generating/pending is left alone
-   — this never triggers a second generation. */
+/* ---------- quiz status label ----------
+   Quiz generation is MANUAL: opening or selecting a lesson NEVER generates a
+   quiz. Generation happens only from the quiz view itself (renderQuiz ->
+   quizStartGeneration) when the student clicks "Start Quiz". quizStatusCache is
+   retained but is no longer pre-populated, so quizButtonLabel simply reads
+   "Start Quiz" on the lesson views. */
 
-const quizStatusCache = {}; // concept_id -> last known quiz status
+const quizStatusCache = {}; // concept_id -> last known quiz status (no longer prefetched)
 
 function quizButtonLabel(conceptId) {
   const status = conceptId != null ? quizStatusCache[conceptId] : null;
   return (status === 'generating' || status === 'pending') ? 'Preparing quiz…' : 'Start Quiz';
-}
-
-async function maybePrefetchQuiz(conceptId) {
-  if (conceptId == null) return null;
-  let data;
-  try {
-    data = await api.get(`/concepts/${conceptId}/quiz`);
-  } catch (_) {
-    return null; // best-effort status check — never blocks the caller
-  }
-  const status = data && data.status;
-  quizStatusCache[conceptId] = status;
-  if (status === 'none' || status === 'failed') {
-    quizStatusCache[conceptId] = 'generating'; // optimistic: generate always flips it to this
-    api.post(`/concepts/${conceptId}/quiz/generate`, {}).catch(() => {
-      quizStatusCache[conceptId] = status; // revert the optimistic label if the fire failed outright
-    });
-  }
-  return status;
 }
 
 /* ---------- PDF reader overlay: shared immersive reader ---------- */
@@ -1921,24 +2476,24 @@ function readerToolbarHtml() {
       '<path d="M18 13l-7 7H7l-4-4a2 2 0 0 1 0-2.8L13 3l7 7-2 3z"/><path d="M9.5 7.5l7 7"/>' },
   ];
   const toolBtns = tools.map((t) => `
-    <button data-action="reader-tool" data-tool="${t.tool}" title="${esc(t.title)}"
+    <button data-action="reader-tool" data-tool="${t.tool}" title="${esc(t.title)}" aria-label="${esc(t.title)}"
       class="reader-tool-btn${t.active ? ' reader-tool-btn-active' : ''}">
       <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${t.svg}</svg>
     </button>`).join('');
   const swatches = READER_COLORS.map((c, i) => `
-    <button data-action="reader-color" data-color="${c}" title="Color"
+    <button data-action="reader-color" data-color="${c}" title="Color" aria-label="Color"
       class="reader-swatch${i === 0 ? ' reader-swatch-active' : ''}" style="background:${c}"></button>`).join('');
   return `
     ${toolBtns}
     <span class="reader-tool-sep"></span>
     <div class="flex items-center gap-1">${swatches}</div>
-    <button data-action="reader-stroke" data-width="thin" title="Toggle stroke width" class="reader-tool-btn">
+    <button data-action="reader-stroke" data-width="thin" title="Toggle stroke width" aria-label="Toggle stroke width" class="reader-tool-btn">
       <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round">
         <path d="M4 10h16" stroke-width="1.5"/><path d="M4 16h16" stroke-width="3.5"/>
       </svg>
     </button>
     <span class="reader-tool-sep"></span>
-    <button data-action="reader-undo" title="Undo" class="reader-tool-btn">
+    <button data-action="reader-undo" title="Undo" aria-label="Undo" class="reader-tool-btn">
       <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-2"/>
       </svg>
@@ -2164,9 +2719,24 @@ async function readerRenderAllPages(state) {
   // the page to the space actually available inside that padding.
   const availWidth = Math.max(200, scrollEl.clientWidth - 32);
   const dpr = Math.min(window.devicePixelRatio || 1, READER_RENDER_DPR_CAP);
+  // Fix 4 (Build 14 Phase B): build every page ALREADY at the current zoom
+  // (state.scale, defaulting to READER_DEFAULT_ZOOM/58%) instead of at raw
+  // fit-to-width — otherwise pages painted at 100% fit-width then got
+  // shrunk to 58% by the readerApplyZoom() call at the end of this loop,
+  // which read as a big-then-small flash on every open. The backing-store
+  // bitmap render below is untouched (still fitScale×dpr — crisp regardless
+  // of the CSS box size); only the wrapper/text-layer CSS box is pre-scaled.
+  const scale = state.scale || 1;
 
   if (state.observer) { state.observer.disconnect(); state.observer = null; }
+  // B4: keep the open-time loading placeholder (if still present — first
+  // render only; a later resize-triggered re-render finds none) attached
+  // through this rebuild instead of wiping it here, so the scroll area isn't
+  // blank again while the first page's getPage()/render() await below runs.
+  // It's removed just after the first page's wrapper is appended.
+  const loadingEl = scrollEl.querySelector('#reader-loading');
   scrollEl.innerHTML = '';
+  if (loadingEl) scrollEl.appendChild(loadingEl);
   state.pages = [];
 
   const total = doc.numPages;
@@ -2182,8 +2752,8 @@ async function readerRenderAllPages(state) {
     const wrapper = document.createElement('div');
     wrapper.className = 'reader-page';
     wrapper.dataset.pageNumber = String(i);
-    wrapper.style.width = cssW + 'px';
-    wrapper.style.height = cssH + 'px';
+    wrapper.style.width = (cssW * scale) + 'px';
+    wrapper.style.height = (cssH * scale) + 'px';
 
     // 1. The page bitmap. Backing store rendered at fit-width × capped DPR
     // for a crisp display; CSS size (width/height:100% of the wrapper) is
@@ -2202,6 +2772,14 @@ async function readerRenderAllPages(state) {
     // above the bitmap (below our annotation layers). May be null on failure.
     const pdfTextLayerEl = await readerRenderPdfTextLayer(window.__pdfjs, page, fitScale, cssW, cssH);
     if (readerState !== state) return;
+    // Pre-scale the text layer to the same initial zoom as the wrapper (mirrors
+    // the per-page block in readerApplyZoom — kept as a plain CSS box resize +
+    // --scale-factor bump, no transform, for the same reason documented there).
+    if (pdfTextLayerEl) {
+      pdfTextLayerEl.style.width = (cssW * scale) + 'px';
+      pdfTextLayerEl.style.height = (cssH * scale) + 'px';
+      pdfTextLayerEl.style.setProperty('--scale-factor', String(fitScale * scale));
+    }
 
     // 3. Our own annotation canvas (highlight/pen) and note-text layer,
     // sized to the same backing-store pixels as the page canvas.
@@ -2217,6 +2795,9 @@ async function readerRenderAllPages(state) {
     wrapper.appendChild(annCanvas);
     wrapper.appendChild(textLayer);
     scrollEl.appendChild(wrapper);
+    // B4: the first page's canvas has now painted (the `await page.render(...)`
+    // above already resolved) — the loading placeholder has done its job.
+    if (loadingEl && loadingEl.isConnected) loadingEl.remove();
 
     const pageEntry = { pageNumber: i, wrapper, canvas, annCanvas, textLayer, pdfTextLayerEl, cssW, cssH, fitScale };
     state.pages.push(pageEntry);
@@ -2227,6 +2808,9 @@ async function readerRenderAllPages(state) {
   }
 
   if (readerState !== state) return;
+  // Defensive: a 0-page PDF never enters the loop above, so the placeholder
+  // (if this was the first render) would otherwise never be removed.
+  if (loadingEl && loadingEl.isConnected) loadingEl.remove();
   readerApplyZoom(state); // re-apply the current zoom to the freshly built pages
   readerSetupObserver(state);
   if (state.indicatorEl) state.indicatorEl.textContent = `${total ? 1 : 0} / ${total}`;
@@ -2611,6 +3195,10 @@ function readerFinishSnip(state, pageEntry, wrapRect, rect) {
   off.height = outH;
   off.getContext('2d').drawImage(srcCanvas, sx, sy, sw, sh, 0, 0, outW, outH);
   const dataUrl = off.toDataURL('image/png');
+  // Round 10 Part 2 (CANVAS.md §14): stash the crop for a later canvas paste
+  // too, in ADDITION to firing the Ask-AI flow below (unchanged) — a plain
+  // Ctrl+V on the canvas drops this as a new image item. Last snip/copy wins.
+  canvasClipboard = { kind: 'image', dataUrl };
   readerAskRenderSource(state, { kind: 'image', dataUrl });
   state.ask.context = ''; // new visual topic — no text context to carry into a follow-up
   readerAskFire(state, { mode: 'explain', image: dataUrl, context: readerCurrentPageText(state, pageEntry) });
@@ -2851,7 +3439,7 @@ async function readerAskFire(state, params) {
 
   let acc = '';
   try {
-    const full = await api.stream(`/concepts/${ask.conceptId}/ask`, body, (delta) => {
+    const full = await api.stream(askEndpointFor(ask.scope), body, (delta) => {
       if (readerState !== state || ask.controller !== controller) return; // superseded/closed mid-stream
       acc += delta;
       answerEl.textContent = acc;
@@ -2885,13 +3473,19 @@ async function readerAskFire(state, params) {
 }
 
 // Shows/hides the ask panel's single "Pin to canvas" control (round 6) —
-// visible only once there's something worth pinning (>=1 completed turn) and
-// a canvas board is actually open to pin it onto.
+// visible once there's something worth pinning (>=1 completed turn).
+// F1: previously ALSO required a canvas board to already be open
+// (`canvasState`), which meant the control was silently absent whenever the
+// reader was opened from a context with no canvas mounted (e.g. the mind
+// map's "Read note") — a dead end with no way to discover pinning at all.
+// Now it's always shown once there's a turn to pin; readerAskPinToCanvas
+// already handles the no-canvas case with a clear toast ("Open this lesson's
+// canvas to pin a conversation") instead of silently doing nothing.
 function readerAskUpdatePinControl(state) {
   if (!state || !state.ask || !state.ask.panelEl) return;
   const bar = state.ask.panelEl.querySelector('#reader-ask-pin-bar');
   if (!bar) return;
-  bar.hidden = !(canvasState && state.ask.turns && state.ask.turns.length > 0);
+  bar.hidden = !(state.ask.turns && state.ask.turns.length > 0);
 }
 
 // Pins the WHOLE conversation so far as one titled card on the lesson's
@@ -2902,7 +3496,12 @@ async function readerAskPinToCanvas(state) {
   if (!state || !state.ask) return;
   const ask = state.ask;
   if (!canvasState) { ui.toast('Open this lesson’s canvas to pin a conversation', 'error'); return; }
-  if (ask.conceptId !== canvasState.conceptId) { ui.toast('This conversation belongs to a different lesson', 'error'); return; }
+  // Scope-generalized (was a bare conceptId comparison): the pinned convo must
+  // land on the SAME board (concept lesson or revision canvas) it was asked on.
+  const cScope = canvasState.scope;
+  if (!cScope || !ask.scope || cScope.kind !== ask.scope.kind || cScope.id !== ask.scope.id) {
+    ui.toast('This conversation belongs to a different lesson', 'error'); return;
+  }
   if (!ask.turns || !ask.turns.length) return;
 
   const btn = ask.panelEl && ask.panelEl.querySelector('#reader-ask-pin-btn');
@@ -2911,7 +3510,7 @@ async function readerAskPinToCanvas(state) {
   const firstUserText = (ask.turns.find((t) => t.role === 'user') || {}).text || '';
   let title = '';
   try {
-    const raw = await api.stream(`/concepts/${ask.conceptId}/ask`, {
+    const raw = await api.stream(askEndpointFor(ask.scope), {
       question: `In 2 to 4 words, give a short topic title (no quotes, no punctuation, no trailing period) for this study question: "${firstUserText.slice(0, 300)}". Reply with ONLY the title.`,
     }, () => {});
     title = (raw || '').trim().replace(/^["'\s]+|["'\s.。]+$/g, '');
@@ -2930,7 +3529,7 @@ async function readerAskPinToCanvas(state) {
     grounding = 'From the lesson page:\n' + capped;
   }
 
-  canvasPinAiConversation({ title, thread: ask.turns.slice(), conceptId: ask.conceptId, sourceItemId: ask.sourceItemId, grounding });
+  canvasPinAiConversation({ title, thread: ask.turns.slice(), askScope: ask.scope, sourceItemId: ask.sourceItemId, grounding });
 
   if (btn) { btn.disabled = false; btn.textContent = '📌 Pin to canvas'; }
 }
@@ -2967,9 +3566,15 @@ function openReader(note, opts = {}) {
   if (readerState) closeReader();
 
   // "Ask AI" (Phase B) is opt-in per open: only the canvas lesson-open call
-  // sites pass a conceptId. The dormant study-view callers pass no 2nd arg
-  // (opts = {}), so hasAsk stays false there — no menu/panel/buttons render.
-  const hasAsk = !!(opts && opts.conceptId);
+  // sites pass a conceptId (or, since the revision canvas, an askScope). The
+  // dormant study-view callers pass no 2nd arg (opts = {}), so hasAsk stays
+  // false there — no menu/panel/buttons render.
+  // Scope generalization: opts.askScope = {kind:'concept'|'revision', id} is
+  // the general form; every existing caller instead passes opts.conceptId,
+  // which is wrapped into {kind:'concept', id} here for back-compat — their
+  // ask traffic keeps hitting the exact same /concepts/:id/ask URL as before.
+  const askScope = (opts && opts.askScope) || (opts && opts.conceptId != null ? { kind: 'concept', id: opts.conceptId } : null);
+  const hasAsk = !!askScope;
 
   const container = document.createElement('div');
   container.className = 'reader-overlay reader-tool-none';
@@ -3015,7 +3620,7 @@ function openReader(note, opts = {}) {
       </div>
     </div>
     <div class="reader-viewport">
-      <div class="reader-scroll" id="reader-scroll"></div>
+      <div class="reader-scroll" id="reader-scroll"><div class="reader-loading" id="reader-loading"><div class="reader-spinner"></div><p class="reader-loading-text">Loading…</p></div></div>
       ${hasAsk ? `<div class="reader-ask-panel" id="reader-ask-panel" hidden>${readerAskPanelHtml()}</div>` : ''}
     </div>
     ${hasAsk ? `<div class="reader-ask-menu" id="reader-ask-menu" hidden>${readerAskMenuHtml()}</div>` : ''}`;
@@ -3023,7 +3628,15 @@ function openReader(note, opts = {}) {
   requestAnimationFrame(() => { container.classList.add('reader-open'); });
 
   const keyHandler = (e) => {
-    if (e.key === 'Escape') { closeReader(); return; }
+    if (e.key === 'Escape') {
+      // Stop this Escape from also reaching another document-level keydown
+      // listener behind the reader (e.g. the mind map's, which clears its own
+      // selection on Escape) — only the Escape path is affected here.
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      closeReader();
+      return;
+    }
     const mod = e.ctrlKey || e.metaKey;
     if (!mod) return;
     if (e.key.toLowerCase() === 'z') {
@@ -3067,6 +3680,7 @@ function openReader(note, opts = {}) {
     saveTimer: null,
     savedFadeTimer: null,
     ask: hasAsk ? {
+      scope: askScope,
       conceptId: opts.conceptId,
       conceptName: opts.conceptName || '',
       conceptSummary: opts.conceptSummary || '',
@@ -3164,9 +3778,65 @@ function closeReader() {
 
 let canvasState = null; // { courseId, conceptId, scrollEl, worldEl, note, concept, files, filesById,
                          //   itemsById (Map id -> {data, el, refKind, refObj, clickable}),
-                         //   tx, ty, scale, selectedId, drawings, dirty, saveTimer, spaceDown, _cleanup,
-                         //   fileSearch, fileSort, _panRaf }  (Phase 2b additions: concept, fileSearch,
-                         //   fileSort, _panRaf — everything else is Phase 2a)
+                         //   tx, ty, scale, selection ({items:Set, drawings:Set} — Selection Core,
+                         //   generalizes the old single `selectedId`; a read-only `state.selectedId`
+                         //   getter is still defined for back-compat), drawings, dirty, saveTimer,
+                         //   spaceDown, _cleanup, fileSearch, fileSort, _panRaf }  (Phase 2b additions:
+                         //   concept, fileSearch, fileSort, _panRaf — everything else is Phase 2a)
+                         //   (round 10 Part 2 addition: _activeItemDragEl — the item element currently
+                         //   mid drag/resize, if any, so a pinch-zoom's 2nd pointer can force it to end)
+                         //   (Revision-canvas addition: `scope: { kind: 'concept'|'revision', id }` —
+                         //   which board this is. Concept scope keeps `conceptId`/`concept`/`concepts`/
+                         //   `note`/`notesByConceptId` populated exactly as before (scope.id === conceptId,
+                         //   kept in sync); revision scope instead carries `revision: { id, status,
+                         //   error_message, token }` + `revisionTitle`, and leaves `conceptId`/`concept`
+                         //   unset (falsy) — every concept-only helper (lesson list/switch, Start Quiz/
+                         //   Mark-done, note rename) is simply never invoked for that scope. Layout/upload
+                         //   URLs go through canvasLayoutApiBase(state); a dropped file's raw/pdf/thumb/
+                         //   rename/delete/annotation URLs go through canvasFileMediaBase(state).)
+
+function canvasIsRevisionScope(state) {
+  return !!(state && state.scope && state.scope.kind === 'revision');
+}
+// Base path (no /api prefix — api.js's methods add it) for this canvas's own
+// layout GET/PUT and file-upload POST endpoints.
+function canvasLayoutApiBase(state) {
+  return canvasIsRevisionScope(state) ? `/revisions/${state.scope.id}` : `/concepts/${state.scope.id}`;
+}
+// Path segment for a dropped file's raw/pdf/thumb/PATCH/DELETE/annotations
+// endpoints — routers/revision_canvas.py mirrors routers/canvas.py's shape
+// exactly, keyed on revision_id instead of concept_id, under this sibling path.
+function canvasFileMediaBase(state) {
+  return canvasIsRevisionScope(state) ? 'revision-canvas-files' : 'canvas-files';
+}
+
+// Ask-AI endpoint root for a given scope ({kind:'concept'|'revision', id}) —
+// generalizes the reader/canvas "ask" call sites (previously hardcoded to
+// `/concepts/${conceptId}/ask`) so the same ask panel/pin/convo/lightbox code
+// can target either POST /concepts/:id/ask or the sibling
+// POST /revisions/:id/ask (routers/revision_canvas.py). Concept is the
+// default/back-compat shape — see openReader's opts.conceptId handling.
+function askEndpointFor(scope) {
+  return (scope && scope.kind === 'revision') ? `/revisions/${scope.id}/ask` : `/concepts/${scope.id}/ask`;
+}
+
+// Global search (Fix 2, Build 14 Phase B): set by selectSearchResult when a
+// canvas-text match is picked from a DIFFERENT concept's canvas than the one
+// (if any) currently open — location.hash then navigates to that concept's
+// canvas, and renderCanvasView's normal load path consumes this one-shot
+// (nulling it) to pan to the target drawing once the board is built, instead
+// of leaving the view at its usual fit-to-view/saved position. Left null when
+// the palette instead pans in-place on an already-open matching canvas.
+let canvasPendingFocus = null; // { conceptId, drawingId } | null
+
+// Clipboard core (round 10 Part 2, CANVAS.md §14): a module-level slot (not
+// per-lesson state) so it survives switching lessons within the session — a
+// bonus cross-canvas paste. Holds ONE of:
+//   { kind: 'selection', items: [...cloned pinned-'ai' item models...], drawings: [...cloned drawing objects...] }
+//   { kind: 'image', dataUrl }   -- a stashed reader/lightbox snip crop
+// Only one kind at a time; the last copy/snip action wins (canvasClipboard is
+// simply overwritten, never merged).
+let canvasClipboard = null;
 
 const CANVAS_ZOOM_MIN = 0.15;
 const CANVAS_ZOOM_MAX = 4;
@@ -3189,8 +3859,33 @@ const CANVAS_TEXT_SIZE = 18; // world px font-size for a fresh text/sticky note
 // dark canvas), distinct from the user-colored `arrow` tool. Applied at render
 // time in canvasBuildDrawingEl so legacy/persisted connectors turn purple too.
 const CANVAS_CONNECTOR_COLOR = '#B026FF';
+
+// Visual fixes round: the sticky-note frame stroke used to be a hardcoded
+// 'rgba(0,0,0,.12)' (invisible in dark mode) — read the theme's own
+// --border-strong token at build time instead so it adapts to both themes.
+// Cheap (one getComputedStyle read per sticky repaint) and always current
+// even if the user toggles the theme mid-session.
+function canvasBorderStrongColor() {
+  const v = getComputedStyle(document.documentElement).getPropertyValue('--border-strong');
+  return (v && v.trim()) || '#9a93ad';
+}
+
 const CANVAS_TOOLS = ['select', 'pen', 'text', 'sticky', 'rect', 'ellipse', 'line', 'arrow', 'connector', 'eraser'];
 const CANVAS_HISTORY_CAP = 100;
+// Selection Core (multi-select): screen-px drag threshold before an empty-
+// canvas pointerdown commits to a marquee-select instead of being treated as
+// a plain click (mirrors the 3-4px thresholds used elsewhere on the canvas —
+// item drag, drawing manipulate).
+const CANVAS_MARQUEE_THRESHOLD = 4;
+
+// The only drawing types canvasDrawingHitTest (single click) and the marquee
+// (drag-select) can target — "box-shaped" drawings with a rectangular
+// bounds via canvasDrawingBounds. Matches the pre-existing hit-test comment:
+// "Only box-shaped drawings (sticky/rect/ellipse/text) are grab targets so a
+// big pen stroke's bounding box doesn't swallow pans/marquees."
+function canvasDrawingIsBoxSelectable(d) {
+  return !!d && (d.type === 'sticky' || d.type === 'rect' || d.type === 'ellipse' || d.type === 'text');
+}
 
 function canvasClampScale(s) { return Math.min(CANVAS_ZOOM_MAX, Math.max(CANVAS_ZOOM_MIN, s)); }
 function canvasNewItemId() { return 'it_' + Math.random().toString(36).slice(2, 10); }
@@ -3326,13 +4021,18 @@ function canvasRenderLessonControls(state) {
 // search + sort control which/how the FILE rows (never the note) are
 // filtered/ordered; a null itemId (file exists but nothing currently places
 // it on the board) degrades gracefully in canvasPanToItem().
-function canvasFileRowHtml(row) {
+function canvasFileRowHtml(row, isChild) {
+  // Fix 1: a convo nested under the file/note it was pinned from gets an
+  // extra class so CSS can indent it (canvas-file-row-child in canvas.css).
+  // Orphaned convos (no resolvable source) render exactly as before, at the
+  // top level in the bottom "Conversations" group.
+  const childCls = isChild ? ' canvas-file-row-child' : '';
   // Round 7 Part 3: a pinned AI conversation — the "AI" tag, its title, and a
   // delete control. Unlike a file row, clicking it OPENS the conversation
   // (content, not a spatial location on the board) rather than panning to it.
   if (row.rowKind === 'ai') {
     return `
-      <div class="canvas-file-row" title="${esc(row.name)}">
+      <div class="canvas-file-row${childCls}" title="${esc(row.name)}">
         <div data-action="canvas-open-convo" data-item-id="${row.itemId}" class="canvas-file-row-main">
           <span class="canvas-file-tag canvas-file-tag-ai">AI</span>
           <span class="truncate">${esc(row.name)}</span>
@@ -3350,7 +4050,7 @@ function canvasFileRowHtml(row) {
     : `<button type="button" data-action="canvas-rename-file" data-file-id="${row.fileId}" title="Rename" class="canvas-file-action">${renameIcon}</button>
       <button type="button" data-action="canvas-delete-file" data-file-id="${row.fileId}" title="Remove" class="canvas-file-action canvas-file-action-danger">${trashIcon}</button>`;
   return `
-    <div class="canvas-file-row" title="${esc(row.name)}">
+    <div class="canvas-file-row${childCls}" title="${esc(row.name)}">
       <div data-action="canvas-pan-to-item" data-item-id="${row.itemId || ''}" class="canvas-file-row-main">
         <span class="canvas-file-tag">${esc(row.kindLabel)}</span>
         <span class="truncate">${esc(row.name)}</span>
@@ -3369,6 +4069,11 @@ function canvasRenderFileList(state) {
   if (!host) return;
   const q = (state.fileSearch || '').trim().toLowerCase();
   const sort = state.fileSort || 'newest';
+  const cmp = (a, b) => {
+    if (sort === 'name') return a.name.localeCompare(b.name);
+    if (sort === 'type') return a.kindLabel.localeCompare(b.kindLabel) || a.name.localeCompare(b.name);
+    return (b.createdAt || '').localeCompare(a.createdAt || ''); // newest first
+  };
 
   const noteRow = state.note ? {
     rowKind: 'note',
@@ -3379,7 +4084,10 @@ function canvasRenderFileList(state) {
     statusLabel: state.note.status !== 'compiled' ? state.note.status : '',
   } : null;
 
-  let fileRows = state.files.map((f) => ({
+  // Unfiltered (search applied later, per-row, once children are known —
+  // see rowHtml() below) so a parent whose own name doesn't match can still
+  // surface via a matching child convo.
+  const fileRowsAll = state.files.map((f) => ({
     rowKind: 'file',
     kind: f.kind || '',
     itemId: canvasFindItemIdByRef(state, 'canvas-file', f.id),
@@ -3390,22 +4098,26 @@ function canvasRenderFileList(state) {
     createdAt: f.created_at || '',
   }));
 
-  if (q) fileRows = fileRows.filter((r) => r.name.toLowerCase().includes(q));
-  const cmp = (a, b) => {
-    if (sort === 'name') return a.name.localeCompare(b.name);
-    if (sort === 'type') return a.kindLabel.localeCompare(b.kindLabel) || a.name.localeCompare(b.name);
-    return (b.createdAt || '').localeCompare(a.createdAt || ''); // newest first
-  };
-  const showNote = !!noteRow && (!q || noteRow.name.toLowerCase().includes(q));
-
-  // Round 7 Part 3: pinned AI conversations, scanned live off the itemsById
-  // map (their thread/title lives only in the item's ref — no separate
-  // client-side collection) so they're searchable/sortable alongside files.
-  let aiRows = [];
+  // Fix 1: pinned AI conversations, scanned live off the itemsById map (their
+  // thread/title lives only in the item's ref — no separate client-side
+  // collection). Each is nested under the file/note item it was pinned FROM:
+  // resolved from ref.sourceItemId (added when Fix 1 landed), falling back to
+  // the `from` of its persisted connector drawing for a convo pinned before
+  // that field existed — the connector was always drawn at pin time
+  // (canvasPinAiConversation), so this recovers the hierarchy for every
+  // existing pinned convo too. A convo whose resolved source isn't a
+  // currently-rendered note/file item (source deleted, or genuinely never
+  // had one) falls back to the flat "Conversations" group at the bottom.
+  const allAiRows = [];
   state.itemsById.forEach((entry, itemId) => {
     if (entry.refKind !== 'ai') return;
     const obj = entry.refObj || {};
-    aiRows.push({
+    let sourceItemId = obj.sourceItemId || null;
+    if (!sourceItemId) {
+      const conn = (state.drawings || []).find((d) => d.type === 'connector' && d.to === itemId);
+      if (conn) sourceItemId = conn.from || null;
+    }
+    allAiRows.push({
       rowKind: 'ai',
       kind: 'ai',
       itemId,
@@ -3414,22 +4126,52 @@ function canvasRenderFileList(state) {
       name: obj.title || 'AI conversation',
       statusLabel: '',
       createdAt: obj.created_at ? new Date(obj.created_at).toISOString() : '',
+      sourceItemId,
     });
   });
-  if (q) aiRows = aiRows.filter((r) => r.name.toLowerCase().includes(q));
-  aiRows.sort(cmp);
+
+  const parentItemIds = new Set();
+  if (noteRow && noteRow.itemId) parentItemIds.add(noteRow.itemId);
+  fileRowsAll.forEach((r) => { if (r.itemId) parentItemIds.add(r.itemId); });
+
+  const childrenByParent = new Map(); // parent itemId -> ai rows
+  const orphanRows = [];
+  allAiRows.forEach((row) => {
+    if (row.sourceItemId && parentItemIds.has(row.sourceItemId)) {
+      if (!childrenByParent.has(row.sourceItemId)) childrenByParent.set(row.sourceItemId, []);
+      childrenByParent.get(row.sourceItemId).push(row);
+    } else {
+      orphanRows.push(row);
+    }
+  });
+  childrenByParent.forEach((rows) => rows.sort(cmp));
+  orphanRows.sort(cmp);
+
+  // Renders one parent row plus its nested children, applying the search: a
+  // parent shows if ITS name matches OR it has >=1 matching child; a shown
+  // child must itself match the query (no query = show everything).
+  function rowWithChildrenHtml(row) {
+    const children = childrenByParent.get(row.itemId) || [];
+    const childrenToShow = q ? children.filter((c) => c.name.toLowerCase().includes(q)) : children;
+    const parentMatches = !q || row.name.toLowerCase().includes(q);
+    if (q && !parentMatches && !childrenToShow.length) return '';
+    return canvasFileRowHtml(row) + childrenToShow.map((c) => canvasFileRowHtml(c, true)).join('');
+  }
+
+  const groupFiles = (pred) => fileRowsAll.filter(pred).sort(cmp).map(rowWithChildrenHtml).join('');
+  const orphanRowsFiltered = q ? orphanRows.filter((r) => r.name.toLowerCase().includes(q)) : orphanRows;
 
   // Group by type with subheaders (fixed order); hide empty groups.
   const groups = [
-    { label: 'Lesson note', rows: showNote ? [noteRow] : [] },
-    { label: 'Images', rows: fileRows.filter((r) => r.kind === 'image').sort(cmp) },
-    { label: 'PDFs', rows: fileRows.filter((r) => r.kind === 'pdf').sort(cmp) },
-    { label: 'Documents', rows: fileRows.filter((r) => r.kind === 'docx' || r.kind === 'pptx').sort(cmp) },
-    { label: 'Conversations', rows: aiRows },
-  ].filter((g) => g.rows.length);
+    { label: 'Lesson note', html: noteRow ? rowWithChildrenHtml(noteRow) : '' },
+    { label: 'Images', html: groupFiles((r) => r.kind === 'image') },
+    { label: 'PDFs', html: groupFiles((r) => r.kind === 'pdf') },
+    { label: 'Documents', html: groupFiles((r) => r.kind === 'docx' || r.kind === 'pptx') },
+    { label: 'Conversations', html: orphanRowsFiltered.map((r) => canvasFileRowHtml(r)).join('') },
+  ].filter((g) => g.html);
 
   host.innerHTML = groups.length
-    ? groups.map((g) => `<p class="canvas-file-group-title">${esc(g.label)}</p>${g.rows.map(canvasFileRowHtml).join('')}`).join('')
+    ? groups.map((g) => `<p class="canvas-file-group-title">${esc(g.label)}</p>${g.html}`).join('')
     : `<p class="canvas-sidebar-empty">${q ? 'Nothing matches your search.' : 'No files or conversations on this board yet.'}</p>`;
 }
 
@@ -3525,6 +4267,85 @@ function canvasShellHtml(courseId, activeConceptId, concepts, notesByConceptId, 
               <g id="canvas-vectors-g"></g>
             </svg>
           </div>
+          <div class="canvas-empty-hint" id="canvas-empty-hint" hidden>
+            <p>Nothing here yet — drop a file, or generate this lesson's note from the course page.</p>
+            <button type="button" id="canvas-empty-add-file-btn" class="btn btn-secondary">+ Add file</button>
+          </div>
+          <p class="canvas-gesture-hint">Drag to select &middot; Space or middle-drag to pan</p>
+        </div>
+        <div id="canvas-toolbar-host"></div>
+      </div>
+    </div>`;
+}
+
+// Revision-canvas shell (round: revision canvas, part 1) — a pared-down
+// sibling of canvasShellHtml above for a REVISION's own board: no lesson-list
+// sidebar (a revision has no sibling lessons to switch between) and no
+// Start-Quiz/Mark-done topbar controls (a revision isn't a lesson). Kept as
+// its own function rather than branching canvasShellHtml so the concept-scope
+// shell stays byte-for-byte untouched. Everything else — the Files sidebar,
+// canvas-scroll/world/vectors surface, zoom controls, toolbar host — mirrors
+// canvasShellHtml's markup/ids exactly, so the shared wiring code
+// (canvasWireEvents, the search/sort/add-file listeners + sidebar resizer
+// wiring in renderCanvasView/renderRevisionCanvasView, canvasRenderToolbar)
+// works unchanged against this shell too. `.canvas-main` is `flex:1 1 auto`
+// (canvas.css) so omitting the lessons sidebar `<div>` entirely — rather than
+// hiding it — reflows correctly with no layout special-casing needed.
+function canvasRevisionShellHtml(courseId, title) {
+  const filesCollapsed = canvasSidebarCollapsed('files');
+  const filesWidthAttr = filesCollapsed ? '' : ` style="width:${canvasSidebarWidth('files')}px"`;
+  return `
+    <div class="canvas-shell canvas-tool-select">
+      <div class="canvas-sidebar canvas-sidebar-files${filesCollapsed ? ' collapsed' : ''}" id="canvas-sidebar-files"${filesWidthAttr}>
+        <div class="canvas-sidebar-header">
+          <span class="canvas-sidebar-title">Files</span>
+          ${canvasSidebarToggleBtnHtml('files', filesCollapsed)}
+        </div>
+        <div class="canvas-sidebar-body">
+          <div class="canvas-panel-card canvas-tools-card">
+            <div class="canvas-file-toolbar">
+              <input id="canvas-file-search" type="search" placeholder="Search files&hellip;" class="field-input canvas-file-search" />
+              <select id="canvas-file-sort" class="field-input canvas-file-sort">
+                <option value="newest">Newest</option>
+                <option value="name">Name (A&ndash;Z)</option>
+                <option value="type">Type</option>
+              </select>
+            </div>
+            <button id="canvas-add-file-btn" type="button" class="btn btn-secondary canvas-add-file-btn">+ Add file</button>
+            <input id="canvas-file-input" type="file" multiple class="hidden" />
+          </div>
+          <div class="canvas-panel-card canvas-files-card">
+            <p class="canvas-panel-card-title">Files</p>
+            <div class="canvas-sidebar-list" id="canvas-file-list"></div>
+          </div>
+        </div>
+        <div class="canvas-sidebar-resizer" data-side="files" title="Drag to resize"></div>
+      </div>
+      <div class="canvas-main">
+        <div class="canvas-topbar">
+          <a href="#/analysis/course/${courseId}" class="btn btn-ghost">&larr; Analysis</a>
+          <p class="canvas-topbar-title truncate" title="${esc(title)}">${esc(title)}</p>
+          <div class="canvas-zoom-controls">
+            <button data-action="canvas-zoom-out" title="Zoom out (-)" class="icon-btn">&minus;</button>
+            <span id="canvas-zoom-level" class="canvas-zoom-label">100%</span>
+            <button data-action="canvas-zoom-in" title="Zoom in (+)" class="icon-btn">&plus;</button>
+            <button data-action="canvas-zoom-reset" title="Fit to view (0)" class="btn btn-ghost">Fit</button>
+          </div>
+        </div>
+        <div class="canvas-scroll" id="canvas-scroll">
+          <div class="canvas-world" id="canvas-world">
+            <svg id="canvas-vectors"
+                 style="position:absolute; left:-100000px; top:-100000px; width:200000px; height:200000px; overflow:visible;"
+                 viewBox="-100000 -100000 200000 200000">
+              <defs id="canvas-vectors-defs"></defs>
+              <g id="canvas-vectors-g"></g>
+            </svg>
+          </div>
+          <div class="canvas-empty-hint" id="canvas-empty-hint" hidden>
+            <p>Nothing here yet — drop a file, or check back once the revision PDF compiles.</p>
+            <button type="button" id="canvas-empty-add-file-btn" class="btn btn-secondary">+ Add file</button>
+          </div>
+          <p class="canvas-gesture-hint">Drag to select &middot; Space or middle-drag to pan</p>
         </div>
         <div id="canvas-toolbar-host"></div>
       </div>
@@ -3559,6 +4380,15 @@ function canvasItemRefData(state, item) {
   // silently vanished (and could be permanently dropped by a refresh). Matching
   // on presence keeps item #0 (and its connectors) alive across regeneration.
   if (item.ref.type === 'note') return state.note ? { kind: 'note', obj: state.note } : null;
+  // Revision canvas item #0 — the exam's own revision PDF. Unlike a note,
+  // revisions.id is STABLE across a regenerate (routers/analysis.py's
+  // generate_revision UPDATEs the same row), so plain id equality is enough —
+  // no presence-fallback workaround needed.
+  if (item.ref.type === 'revision-pdf') {
+    return (state.revision && state.revision.id === item.ref.id)
+      ? { kind: 'revision-pdf', obj: { id: state.revision.id, status: state.revision.status, error_message: state.revision.error_message, token: state.revision.token, title: state.revisionTitle } }
+      : null;
+  }
   if (item.ref.type === 'canvas-file') {
     const obj = state.filesById.get(item.ref.id);
     return obj ? { kind: 'canvas-file', obj } : null;
@@ -3574,7 +4404,10 @@ function canvasItemRefData(state, item) {
   if (item.ref.type === 'ai') {
     const ref = item.ref;
     if (Array.isArray(ref.thread)) {
-      return { kind: 'ai', obj: { title: ref.title || 'AI conversation', thread: ref.thread, conceptId: ref.conceptId, created_at: ref.created_at || 0 } };
+      // Fix 1: surface sourceItemId (may be undefined on a convo pinned
+      // before that field existed — canvasRenderFileList's connector
+      // fallback recovers it for those).
+      return { kind: 'ai', obj: { title: ref.title || 'AI conversation', thread: ref.thread, conceptId: ref.conceptId, created_at: ref.created_at || 0, sourceItemId: ref.sourceItemId || null } };
     }
     const question = ref.question || '';
     const answer = ref.answer || '';
@@ -3586,6 +4419,7 @@ function canvasItemRefData(state, item) {
         thread: [{ role: 'user', text: question }, { role: 'assistant', text: answer }],
         conceptId: state.conceptId,
         created_at: ref.created_at || 0, // legacy (round 5) ref predates created_at
+        sourceItemId: ref.sourceItemId || null, // legacy ref never had this
       },
     };
   }
@@ -3601,7 +4435,7 @@ function canvasSpinnerHtml() {
   return '<span class="canvas-item-spinner"></span>';
 }
 
-function canvasItemContentHtml(refKind, obj) {
+function canvasItemContentHtml(refKind, obj, state) {
   if (refKind === 'uploading') {
     if (obj.phase === 'failed') {
       return `<div class="canvas-item-thumb"><div class="canvas-item-thumb-placeholder canvas-item-error" title="${esc(obj.error || '')}">Failed</div></div><div class="canvas-item-label">${esc(obj.name)}</div>`;
@@ -3619,6 +4453,22 @@ function canvasItemContentHtml(refKind, obj) {
       return `<div class="canvas-item-thumb"><div class="canvas-item-thumb-placeholder canvas-item-error">Compile failed</div></div><div class="canvas-item-label">${esc(obj.title || 'Note')}</div>`;
     }
     return `<div class="canvas-item-thumb"><div class="canvas-item-thumb-placeholder">${canvasSpinnerHtml()}</div></div><div class="canvas-item-label">${esc(obj.title || 'Note')} &middot; generating&hellip;</div>`;
+  }
+  // Revision canvas item #0 (parallel to the 'note' branch above) — the
+  // exam's compiled revision PDF. Never dropped/blanked regardless of status
+  // (canvasItemRefData resolves it by stable id equality, always present once
+  // the board is open); a generating/failed status just changes the thumb
+  // placeholder, same as a note mid-compile.
+  if (refKind === 'revision-pdf') {
+    const vTok = obj.token ? `?v=${encodeURIComponent(obj.token)}` : '';
+    if (obj.status === 'compiled') {
+      const thumb = `<img src="/api/revisions/${obj.id}/thumb${vTok}" alt="" draggable="false" class="canvas-item-thumb-img">`;
+      return `<div class="canvas-item-thumb">${thumb}</div><div class="canvas-item-label">${esc(obj.title || 'Revision PDF')}</div>`;
+    }
+    if (obj.status === 'failed') {
+      return `<div class="canvas-item-thumb"><div class="canvas-item-thumb-placeholder canvas-item-error" title="${esc(obj.error_message || '')}">Compile failed</div></div><div class="canvas-item-label">${esc(obj.title || 'Revision PDF')}</div>`;
+    }
+    return `<div class="canvas-item-thumb"><div class="canvas-item-thumb-placeholder">${canvasSpinnerHtml()}</div></div><div class="canvas-item-label">${esc(obj.title || 'Revision PDF')} &middot; generating&hellip;</div>`;
   }
   if (refKind === 'ai') {
     // Round 6: a clean, openable summary card — title + message count + a
@@ -3647,8 +4497,19 @@ function canvasItemContentHtml(refKind, obj) {
     </div>`;
   }
   // canvas-file
+  // Fix (canvas image re-add showing the old cached image): canvas_files.id
+  // is a plain INTEGER PRIMARY KEY (no AUTOINCREMENT), so deleting the newest
+  // row lets SQLite reuse its id — a re-added file can get the SAME id, and
+  // thus the SAME /raw or /thumb URL, as a deleted one, serving the browser's
+  // cached response for the old file. Append the file's disk_uuid (unique per
+  // physical file) as a cache-busting query token so a reused id still gets a
+  // fresh URL for the new file.
+  // canvas-file / revision-canvas-file — same shape, different endpoint root
+  // (mediaBase) depending on which board this is.
+  const mediaBase = canvasFileMediaBase(state);
+  const vTok = obj.disk_uuid ? `?v=${encodeURIComponent(obj.disk_uuid)}` : '';
   if (obj.kind === 'image') {
-    return `<div class="canvas-item-image"><img src="/api/canvas-files/${obj.id}/raw" alt="" draggable="false" class="canvas-item-image-img"></div><div class="canvas-item-label">${esc(obj.display_name)}</div>`;
+    return `<div class="canvas-item-image"><img src="/api/${mediaBase}/${obj.id}/raw${vTok}" alt="" draggable="false" class="canvas-item-image-img"></div><div class="canvas-item-label">${esc(obj.display_name)}</div>`;
   }
   if (obj.status === 'converting') {
     return `<div class="canvas-item-thumb"><div class="canvas-item-thumb-placeholder">${canvasSpinnerHtml()}</div></div><div class="canvas-item-label">${esc(obj.display_name)} &middot; converting&hellip;</div>`;
@@ -3656,13 +4517,14 @@ function canvasItemContentHtml(refKind, obj) {
   if (obj.status === 'failed') {
     return `<div class="canvas-item-thumb"><div class="canvas-item-thumb-placeholder canvas-item-error" title="${esc(obj.error_message || '')}">Failed</div></div><div class="canvas-item-label">${esc(obj.display_name)}</div>`;
   }
-  const thumb = `<img src="/api/canvas-files/${obj.id}/thumb" alt="" draggable="false" class="canvas-item-thumb-img">`;
+  const thumb = `<img src="/api/${mediaBase}/${obj.id}/thumb${vTok}" alt="" draggable="false" class="canvas-item-thumb-img">`;
   return `<div class="canvas-item-thumb">${thumb}</div><div class="canvas-item-label">${esc(obj.display_name)}</div>`;
 }
 
 function canvasItemIsClickable(refKind, obj) {
   if (refKind === 'uploading') return false;
   if (refKind === 'note') return obj.status === 'compiled';
+  if (refKind === 'revision-pdf') return obj.status === 'compiled';
   if (refKind === 'ai') return true; // round 6: opens the conversation overlay (canvasOpenItem)
   if (obj.kind === 'image') return true;
   return obj.status === 'ready';
@@ -3671,10 +4533,11 @@ function canvasItemIsClickable(refKind, obj) {
 /* ---- mounting + interaction (select / move / resize / open) ---- */
 
 // A small hover ✕ to remove an item (Phase 2b §3). Never shown for the
-// lesson's own note (item #0) — that one isn't deletable from the canvas.
+// lesson's own note (item #0), or a revision canvas's own revision-pdf item
+// #0 — neither is deletable from the canvas.
 function canvasItemCloseBtnHtml(refKind, itemId) {
-  if (refKind === 'note') return '';
-  return `<button type="button" class="canvas-item-close" data-action="canvas-item-delete" data-item-id="${itemId}" title="Remove">&times;</button>`;
+  if (refKind === 'note' || refKind === 'revision-pdf') return '';
+  return `<button type="button" class="canvas-item-close" data-action="canvas-item-delete" data-item-id="${itemId}" title="Remove" aria-label="Remove">&times;</button>`;
 }
 
 // Rebuilds an item's inner content (thumb/image/spinner/error + label + the
@@ -3682,9 +4545,9 @@ function canvasItemCloseBtnHtml(refKind, itemId) {
 // first mount and to refresh in place after an upload/poll/rename changes
 // what an item points at, without tearing down the element (keeps its drag
 // listeners + selection state intact).
-function canvasSetItemContent(el, refKind, obj) {
+function canvasSetItemContent(el, refKind, obj, state) {
   el.innerHTML = canvasItemCloseBtnHtml(refKind, el.dataset.itemId)
-    + canvasItemContentHtml(refKind, obj)
+    + canvasItemContentHtml(refKind, obj, state)
     + '<div class="canvas-item-resize" title="Resize"></div>';
   // Thumbnails can 404 (no thumb yet / render failed) — fall back to a plain
   // type-tag placeholder rather than a broken-image glyph.
@@ -3693,10 +4556,24 @@ function canvasSetItemContent(el, refKind, obj) {
     thumbImg.addEventListener('error', () => {
       const div = document.createElement('div');
       div.className = 'canvas-item-thumb-placeholder';
-      div.textContent = refKind === 'note' ? 'PDF' : (obj.kind || 'FILE').toUpperCase();
+      div.textContent = (refKind === 'note' || refKind === 'revision-pdf') ? 'PDF' : (obj.kind || 'FILE').toUpperCase();
       thumbImg.replaceWith(div);
     }, { once: true });
   }
+}
+
+// F3: toggles the "Nothing here yet" empty-canvas hint — visible only when
+// the board has NO items (no compiled note #0, no files) AND no whiteboard
+// drawings. Called from every place items/drawings are mounted/removed so it
+// never lingers once something exists, and reappears if the last thing on
+// the board is deleted. pointer-events:none on the hint (canvas.css) keeps it
+// from blocking pan/zoom/drop while shown; only its own "+ Add file" button
+// re-enables pointer-events.
+function canvasUpdateEmptyHint(state) {
+  const hint = document.getElementById('canvas-empty-hint');
+  if (!hint || !state) return;
+  const empty = state.itemsById.size === 0 && (!state.drawings || state.drawings.length === 0);
+  hint.hidden = !empty;
 }
 
 function canvasMountItem(state, item) {
@@ -3710,7 +4587,7 @@ function canvasMountItem(state, item) {
   el.style.width = item.w + 'px';
   el.style.height = item.h + 'px';
   el.style.zIndex = String(item.z || 1);
-  canvasSetItemContent(el, ref.kind, ref.obj);
+  canvasSetItemContent(el, ref.kind, ref.obj, state);
   state.worldEl.appendChild(el);
   // (round 6: the 'ai' card's at-rest preview is plain text, not markdown/
   // KaTeX — no renderMath needed here any more; the full formatted thread
@@ -3719,6 +4596,7 @@ function canvasMountItem(state, item) {
   const entry = { data: item, el, refKind: ref.kind, refObj: ref.obj, clickable: canvasItemIsClickable(ref.kind, ref.obj) };
   state.itemsById.set(item.id, entry);
   canvasWireItemInteraction(state, item.id);
+  canvasUpdateEmptyHint(state);
 }
 
 // Re-derives an item's ref (e.g. an 'uploading' placeholder that just got its
@@ -3733,15 +4611,16 @@ function canvasRefreshItem(state, itemId) {
     // would also drop its connectors (canvasRemoveItemFromDom → canvasDropConnectorsForItem)
     // and persist the deletion. Only genuinely deletable refs (canvas-file /
     // uploading placeholder) are cleaned up here; explicit user deletes go
-    // through canvasRequestDeleteItem.
-    if (entry.data.ref && entry.data.ref.type === 'note') return;
+    // through canvasRequestDeleteItem. Same guard for a revision canvas's own
+    // revision-pdf item #0.
+    if (entry.data.ref && (entry.data.ref.type === 'note' || entry.data.ref.type === 'revision-pdf')) return;
     canvasRemoveItemFromDom(state, itemId); // ref now points at something deleted
     return;
   }
   entry.refKind = ref.kind;
   entry.refObj = ref.obj;
   entry.clickable = canvasItemIsClickable(ref.kind, ref.obj);
-  canvasSetItemContent(entry.el, ref.kind, ref.obj);
+  canvasSetItemContent(entry.el, ref.kind, ref.obj, state);
 }
 
 function canvasRemoveItemFromDom(state, itemId) {
@@ -3749,7 +4628,7 @@ function canvasRemoveItemFromDom(state, itemId) {
   if (!entry) return;
   entry.el.remove();
   state.itemsById.delete(itemId);
-  if (state.selectedId === itemId) state.selectedId = null;
+  state.selection.items.delete(itemId);
   // Phase 3: this is the single choke point where an item stops existing on
   // the board (delete-file confirm, an 'uploading' placeholder removal, and
   // canvasRefreshItem's "ref now points at something deleted" cleanup all
@@ -3757,6 +4636,7 @@ function canvasRemoveItemFromDom(state, itemId) {
   // (CANVAS.md §4.3: "deleting an item must drop any connectors referencing it").
   if (state.pendingConnectorFrom === itemId) canvasConnectorCancel(state);
   if (canvasDropConnectorsForItem(state, itemId)) markCanvasDirty(state);
+  canvasUpdateEmptyHint(state);
 }
 
 function canvasNextZ(state) {
@@ -3782,30 +4662,69 @@ function canvasFindItemIdByRef(state, refType, refId) {
   return null;
 }
 
-function canvasSelectItem(state, itemId) {
-  if (state.selectedId && state.selectedId !== itemId) {
-    const prev = state.itemsById.get(state.selectedId);
-    if (prev) prev.el.classList.remove('selected');
+// Selection Core: generalizes the old single `state.selectedId` to a SET
+// (`state.selection.items` + `state.selection.drawings`) so marquee-select
+// and Shift-click can build a multi-selection. Default (no opts / additive
+// false) behavior is byte-for-byte the old single-select: clear everything
+// else, select just this item, bring it to front. `additive: true` (wired to
+// Shift-click) instead TOGGLES this item's membership in the current
+// selection and never touches z-order (a multi-select shouldn't scramble the
+// stack just from building it up).
+function canvasSelectItem(state, itemId, opts) {
+  const additive = !!(opts && opts.additive);
+  if (!additive) {
+    canvasClearSelection(state);
+  } else if (state.selection.items.has(itemId)) {
+    const entry = state.itemsById.get(itemId);
+    if (entry) entry.el.classList.remove('selected');
+    state.selection.items.delete(itemId);
+    return;
   }
-  state.selectedId = itemId;
+  state.selection.items.add(itemId);
   const entry = state.itemsById.get(itemId);
   if (!entry) return;
   entry.el.classList.add('selected');
-  // bring-to-front on select
-  let maxZ = 0;
-  state.itemsById.forEach((en) => { maxZ = Math.max(maxZ, en.data.z || 0); });
-  if ((entry.data.z || 0) < maxZ) {
-    entry.data.z = maxZ + 1;
-    entry.el.style.zIndex = String(entry.data.z);
-    markCanvasDirty(state);
+  if (!additive) {
+    // bring-to-front on select (single-select only — matches the original
+    // behavior; an additive Shift-click shouldn't reorder the z-stack)
+    let maxZ = 0;
+    state.itemsById.forEach((en) => { maxZ = Math.max(maxZ, en.data.z || 0); });
+    if ((entry.data.z || 0) < maxZ) {
+      entry.data.z = maxZ + 1;
+      entry.el.style.zIndex = String(entry.data.z);
+      markCanvasDirty(state);
+    }
   }
 }
 
+// Drawing counterpart of canvasSelectItem. Drawings have no persistent DOM
+// node to toggle a class on directly (canvasRenderVectors rebuilds the SVG
+// wholesale every repaint) — canvasBuildDrawingEl adds the `.canvas-drawing-
+// selected` halo class itself by checking `state.selection.drawings`, so
+// selecting/deselecting here just mutates the set and repaints.
+function canvasSelectDrawing(state, drawingId, opts) {
+  const additive = !!(opts && opts.additive);
+  if (!additive) {
+    canvasClearSelection(state);
+  } else if (state.selection.drawings.has(drawingId)) {
+    state.selection.drawings.delete(drawingId);
+    canvasRenderVectors(state);
+    return;
+  }
+  state.selection.drawings.add(drawingId);
+  canvasRenderVectors(state);
+}
+
 function canvasClearSelection(state) {
-  if (!state.selectedId) return;
-  const prev = state.itemsById.get(state.selectedId);
-  if (prev) prev.el.classList.remove('selected');
-  state.selectedId = null;
+  if (!state.selection.items.size && !state.selection.drawings.size) return;
+  state.selection.items.forEach((id) => {
+    const entry = state.itemsById.get(id);
+    if (entry) entry.el.classList.remove('selected');
+  });
+  const hadDrawingSelection = state.selection.drawings.size > 0;
+  state.selection.items = new Set();
+  state.selection.drawings = new Set();
+  if (hadDrawingSelection) canvasRenderVectors(state); // repaint drops the selected-drawing halo
 }
 
 // Round 8 item 3: the single place that propagates a lesson (concept) rename
@@ -3849,16 +4768,54 @@ function canvasOpenItem(state, entry) {
     });
     return;
   }
+  // Revision canvas item #0 — opens the reader on the exam's own compiled
+  // revision PDF, now WITH Ask-AI (revision-canvas ask wiring, part 2):
+  // askScope = {kind:'revision', id} routes every ask/pin/convo call on this
+  // reader instance at POST /revisions/:id/ask instead of the concept ask.
+  if (entry.refKind === 'revision-pdf') {
+    const r = entry.refObj;
+    if (r.status !== 'compiled') {
+      ui.toast(r.status === 'failed' ? (r.error_message || 'Revision compile failed.') : 'Revision PDF is not ready yet.', 'error');
+      return;
+    }
+    const vTok = r.token ? `?v=${encodeURIComponent(r.token)}` : '';
+    openReader({
+      id: r.id,
+      title: r.title || 'Revision',
+      pdfUrl: `/api/revisions/${r.id}/pdf${vTok}`,
+      // No dedicated revision-note annotation endpoint exists (only the
+      // per-dropped-file one, routers/revision_canvas.py) — this 404s
+      // harmlessly, same as revisionReaderNote's pre-existing behavior.
+      annGetUrl: `/revisions/${r.id}/annotations`,
+      annPutUrl: `/revisions/${r.id}/annotations`,
+    }, {
+      askScope: { kind: 'revision', id: state.scope.id },
+      conceptName: r.title || 'Revision', // sensible label — no concept summary to show for a revision
+      sourceItemId: entry.data.id,
+    });
+    return;
+  }
   if (entry.refKind === 'ai') { openAiConversation(entry); return; }
   const f = entry.refObj;
   if (f.kind === 'image') { canvasOpenLightbox(f, entry.data.id); return; }
+  // Cache-bust the PDF URL the same way as the thumb/raw images above (a
+  // reused canvas_files.id must not open the reader on a stale cached PDF);
+  // annotation endpoints stay keyed by id only (no ?v=). mediaBase picks the
+  // right endpoint root (canvas-files vs. revision-canvas-files) per scope.
+  const mediaBase = canvasFileMediaBase(state);
+  const pdfVTok = f.disk_uuid ? `?v=${encodeURIComponent(f.disk_uuid)}` : '';
+  // Ask-AI is opt-in per openReader() call (hasAsk = !!opts.askScope/opts.conceptId).
+  // Concept scope keeps passing conceptId exactly as before; a revision
+  // canvas's dropped files now pass askScope = {kind:'revision', id} so they
+  // open with Ask-AI hitting POST /revisions/:id/ask.
+  const isConceptScope = !canvasIsRevisionScope(state);
   openReader({
     id: f.id,
     title: f.display_name,
-    pdfUrl: `/api/canvas-files/${f.id}/pdf`,
-    annGetUrl: `/canvas-files/${f.id}/annotations`,
-    annPutUrl: `/canvas-files/${f.id}/annotations`,
-    renameUrl: `/canvas-files/${f.id}`,
+    pdfUrl: `/api/${mediaBase}/${f.id}/pdf${pdfVTok}`,
+    annGetUrl: `/${mediaBase}/${f.id}/annotations`,
+    annPutUrl: `/${mediaBase}/${f.id}/annotations`,
+    renameUrl: `/${mediaBase}/${f.id}`,
     onRenamed: (name) => {
       f.display_name = name;
       const inState = state.filesById.get(f.id);
@@ -3867,10 +4824,14 @@ function canvasOpenItem(state, entry) {
       if (itemId) canvasRefreshItem(state, itemId);
       canvasRenderFileList(state);
     },
-  }, {
+  }, isConceptScope ? {
     conceptId: state.conceptId,
     conceptName: state.concept && state.concept.name,
     conceptSummary: state.concept && state.concept.summary,
+    sourceItemId: entry.data.id,
+  } : {
+    askScope: { kind: 'revision', id: state.scope.id },
+    conceptName: state.revisionTitle || 'Revision',
     sourceItemId: entry.data.id,
   });
 }
@@ -3895,17 +4856,58 @@ function canvasWireItemInteraction(state, itemId) {
     }
     if (state.tool !== 'select') return;
     e.stopPropagation();
-    canvasSelectItem(state, itemId);
+
+    // Selection Core: Shift-click ONLY toggles this item's membership in the
+    // selection — it never starts a drag/resize/open, mirroring how a
+    // marquee is built up with plain clicks before dragging any member. A
+    // plain (non-Shift) click on an item that's already part of a live
+    // multi-selection keeps that whole selection (so the drag below moves
+    // everyone); a plain click on anything else makes this item the sole
+    // selection, exactly like the original single-select.
+    if (e.shiftKey) {
+      canvasSelectItem(state, itemId, { additive: true });
+      return;
+    }
+    const keepMulti = state.selection.items.has(itemId)
+      && (state.selection.items.size > 1 || state.selection.drawings.size > 0);
+    if (!keepMulti) canvasSelectItem(state, itemId);
+
     // Live lookup (not captured at wire-time): canvasRefreshItem() rebuilds
     // this element's innerHTML (upload finishing, a status poll, a rename),
     // which replaces the resize-handle node — a stale reference here would
     // silently break resizing on any item that's ever been refreshed.
     const handle = el.querySelector('.canvas-item-resize');
-    const isResize = e.target === handle;
+    const moveItemIds = Array.from(state.selection.items);
+    const moveDrawingIds = Array.from(state.selection.drawings);
+    const multi = moveItemIds.length > 1 || moveDrawingIds.length > 0;
+    const isResize = !multi && e.target === handle; // resizing "a whole selection" isn't well-defined — single-item only
     const startClientX = e.clientX, startClientY = e.clientY;
     const start = { x: entry.data.x, y: entry.data.y, w: entry.data.w, h: entry.data.h };
+    // Snapshot starting positions for every item/drawing being moved together
+    // (a no-op single-entry map in the common single-select case).
+    const itemStarts = new Map();
+    moveItemIds.forEach((id) => {
+      const en = state.itemsById.get(id);
+      if (en) itemStarts.set(id, { x: en.data.x, y: en.data.y });
+    });
+    const drawingStarts = new Map();
+    moveDrawingIds.forEach((did) => {
+      const d = (state.drawings || []).find((dd) => dd.id === did);
+      if (!d) return;
+      if (d.type === 'line' || d.type === 'arrow') drawingStarts.set(did, { x1: d.x1, y1: d.y1, x2: d.x2, y2: d.y2 });
+      else if (d.type === 'pen') drawingStarts.set(did, { points: (d.points || []).map((p) => ({ x: p.x, y: p.y })) });
+      else drawingStarts.set(did, { x: d.x, y: d.y });
+    });
     let moved = false;
+    let drawingsSnapshotted = false;
     try { el.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    // Round 10 Part 2 (pinch-zoom, CANVAS.md §14): tracked so a second touch
+    // pointer landing mid-drag can force this gesture to end cleanly (see
+    // canvasCancelActiveGesture) — every OTHER single-pointer gesture already
+    // captures on state.scrollEl, which listens for 'pointercancel' itself;
+    // item drag/resize is the one exception (it captures on the item's own
+    // element instead), so it needs its own reference.
+    state._activeItemDragEl = el;
     const onMove = (ev) => {
       const dxs = ev.clientX - startClientX, dys = ev.clientY - startClientY;
       if (Math.abs(dxs) > 3 || Math.abs(dys) > 3) moved = true;
@@ -3916,10 +4918,25 @@ function canvasWireItemInteraction(state, itemId) {
         el.style.width = entry.data.w + 'px';
         el.style.height = entry.data.h + 'px';
       } else {
-        entry.data.x = start.x + dx;
-        entry.data.y = start.y + dy;
-        el.style.left = entry.data.x + 'px';
-        el.style.top = entry.data.y + 'px';
+        if (moved && drawingStarts.size && !drawingsSnapshotted) { canvasSnapshotHistory(state); drawingsSnapshotted = true; }
+        itemStarts.forEach((st, id) => {
+          const en = state.itemsById.get(id);
+          if (!en) return;
+          en.data.x = st.x + dx;
+          en.data.y = st.y + dy;
+          en.el.style.left = en.data.x + 'px';
+          en.el.style.top = en.data.y + 'px';
+        });
+        if (drawingStarts.size) {
+          drawingStarts.forEach((st, did) => {
+            const d = (state.drawings || []).find((dd) => dd.id === did);
+            if (!d) return;
+            if (d.type === 'line' || d.type === 'arrow') { d.x1 = st.x1 + dx; d.y1 = st.y1 + dy; d.x2 = st.x2 + dx; d.y2 = st.y2 + dy; }
+            else if (d.type === 'pen') { d.points = st.points.map((p) => ({ x: p.x + dx, y: p.y + dy })); }
+            else { d.x = st.x + dx; d.y = st.y + dy; }
+          });
+          canvasRenderVectors(state);
+        }
       }
       canvasUpdateConnectors(state); // Phase 3: keep any attached connector anchored live during drag/resize
     };
@@ -3927,8 +4944,9 @@ function canvasWireItemInteraction(state, itemId) {
       el.removeEventListener('pointermove', onMove);
       el.removeEventListener('pointerup', onUp);
       el.removeEventListener('pointercancel', onUp);
+      if (state._activeItemDragEl === el) state._activeItemDragEl = null;
       if (moved) markCanvasDirty(state);
-      else if (entry.clickable) canvasOpenItem(state, entry);
+      else if (!multi && entry.clickable) canvasOpenItem(state, entry);
     };
     el.addEventListener('pointermove', onMove);
     el.addEventListener('pointerup', onUp);
@@ -3950,6 +4968,14 @@ function canvasPinAiConversation(opts) {
   const state = canvasState;
   const sourceItemId = opts.sourceItemId;
   const src = sourceItemId ? state.itemsById.get(sourceItemId) : null;
+  // Ask-AI scope generalization: callers may pass opts.askScope directly
+  // (e.g. {kind:'revision', id}), or the older opts.conceptId shape — either
+  // way this normalizes to one scope object stored on the ref, so a
+  // continued/re-titled conversation keeps asking the right endpoint
+  // (canvasAiConvoSend). conceptId is still stored alongside for legacy refs
+  // saved before askScope existed.
+  const askScope = opts.askScope || (opts.conceptId != null ? { kind: 'concept', id: opts.conceptId } : null);
+  const conceptId = opts.conceptId != null ? opts.conceptId : (askScope && askScope.kind === 'concept' ? askScope.id : undefined);
 
   // Round 8 item 4: bumped from the original 300x190 — the redesigned card's
   // accent header + bigger title + CTA need more room to read comfortably.
@@ -3970,12 +4996,23 @@ function canvasPinAiConversation(opts) {
       type: 'ai',
       title: opts.title || 'AI conversation',
       thread: opts.thread || [],
-      conceptId: opts.conceptId,
+      conceptId: conceptId,
+      // Revision-canvas ask wiring, part 2: the scope this conversation asks
+      // against (askEndpointFor) — {kind:'concept', id} or {kind:'revision', id}.
+      // A legacy ref saved before this field existed has only `conceptId`;
+      // canvasAiConvoSend falls back to {kind:'concept', id: ref.conceptId}.
+      askScope: askScope || undefined,
       // Round 7: grounding = the page-context this convo started from (for
       // continuity — canvasAiConvoSend); created_at = for the Files sidebar's
       // "Conversations" group (listing/sort). Both optional/backward-compat.
       grounding: opts.grounding || '',
       created_at: Date.now(),
+      // Fix 1: the item this convo was pinned FROM, so the Files sidebar can
+      // nest it under that file/note instead of a flat "Conversations" list.
+      // Additive/backward-compat — a convo pinned before this field existed
+      // just has null here; canvasRenderFileList falls back to the `from` of
+      // the connector drawn just below for those.
+      sourceItemId: opts.sourceItemId || null,
     },
     x, y, w, h,
     z: canvasNextZ(state),
@@ -4183,9 +5220,13 @@ async function canvasAiConvoSend(state, itemId) {
     context = digest.slice(-3500);
   }
 
+  // Legacy refs (pinned before askScope existed) only have ref.conceptId —
+  // fall back to wrapping it as a concept scope so they keep working.
+  const askScope = ref.askScope || { kind: 'concept', id: ref.conceptId };
+
   let acc = '';
   try {
-    const full = await api.stream(`/concepts/${ref.conceptId}/ask`, { question: text, context }, (delta) => {
+    const full = await api.stream(askEndpointFor(askScope), { question: text, context }, (delta) => {
       if (!aiConvoState || aiConvoState.controller !== controller) return; // superseded/closed mid-stream
       acc += delta;
       answerEl.textContent = acc;
@@ -4249,6 +5290,11 @@ function canvasLightboxKeyHandler(e) {
 function canvasOpenLightbox(file, itemId) {
   canvasCloseLightbox();
   const conceptId = canvasState && canvasState.conceptId;
+  // Ask-AI scope (concept or revision) this lightbox's image belongs to —
+  // captured at open time, same as conceptId above (canvasState.scope always
+  // exists for either board — see renderCanvasView/renderRevisionCanvasView).
+  const scope = canvasState && canvasState.scope;
+  const mediaBase = canvasFileMediaBase(canvasState);
   const overlay = document.createElement('div');
   overlay.className = 'canvas-lightbox';
   overlay.innerHTML = `
@@ -4260,7 +5306,7 @@ function canvasOpenLightbox(file, itemId) {
       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>
     </button>
     <div class="canvas-lightbox-stage" id="canvas-lightbox-stage">
-      <img src="/api/canvas-files/${file.id}/raw" alt="${esc(file.display_name)}" class="canvas-lightbox-img" id="canvas-lightbox-img">
+      <img src="/api/${mediaBase}/${file.id}/raw${file.disk_uuid ? `?v=${encodeURIComponent(file.disk_uuid)}` : ''}" alt="${esc(file.display_name)}" class="canvas-lightbox-img" id="canvas-lightbox-img">
     </div>
     <div class="canvas-lightbox-answer-panel" id="canvas-lightbox-answer-panel" hidden>
       <div class="canvas-lightbox-answer-header">
@@ -4284,7 +5330,7 @@ function canvasOpenLightbox(file, itemId) {
   canvasLightboxEl = overlay;
 
   const state = {
-    file, itemId, conceptId,
+    file, itemId, conceptId, scope,
     overlayEl: overlay,
     stageEl: overlay.querySelector('#canvas-lightbox-stage'),
     imgEl: overlay.querySelector('#canvas-lightbox-img'),
@@ -4448,6 +5494,9 @@ function canvasLightboxFinishSnip(state, imgRect, rect) {
     ui.toast('Could not read this image', 'error');
     return;
   }
+  // Round 10 Part 2 (CANVAS.md §14): stash for a later canvas paste too, same
+  // as the reader's readerFinishSnip — Ask-AI below is unchanged.
+  canvasClipboard = { kind: 'image', dataUrl };
   canvasLightboxFireAsk(state, dataUrl, 'Explain this region');
 }
 
@@ -4461,6 +5510,13 @@ function canvasLightboxFinishSnip(state, imgRect, rect) {
 // composer so the topic can be continued via canvasLightboxSendFollowUp.
 async function canvasLightboxFireAsk(state, dataUrl, userText) {
   if (!state || canvasLightboxState !== state) return;
+  // Ask-AI scope: concept-scope boards ground on the concept, revision-scope
+  // boards on the exam revision — derived from the scope captured at open
+  // time (canvasOpenLightbox reads it off canvasState.scope). This is the
+  // single choke point both the whole-image "Ask" button and the "Snip" flow
+  // converge on.
+  const askScope = state.scope;
+  if (!askScope) { ui.toast('Ask AI isn’t available here.', 'error'); return; }
   if (state.controller) { try { state.controller.abort(); } catch (e) { /* ignore */ } }
   const controller = new AbortController();
   state.controller = controller;
@@ -4480,7 +5536,7 @@ async function canvasLightboxFireAsk(state, dataUrl, userText) {
 
   let acc = '';
   try {
-    const full = await api.stream(`/concepts/${state.conceptId}/ask`, body, (delta) => {
+    const full = await api.stream(askEndpointFor(askScope), body, (delta) => {
       if (canvasLightboxState !== state || state.controller !== controller) return; // superseded/closed mid-stream
       acc += delta;
       answerEl.textContent = acc;
@@ -4538,7 +5594,7 @@ async function canvasLightboxSendFollowUp(state) {
 
   let acc = '';
   try {
-    const full = await api.stream(`/concepts/${state.conceptId}/ask`, { question: text, context }, (delta) => {
+    const full = await api.stream(askEndpointFor(state.scope), { question: text, context }, (delta) => {
       if (canvasLightboxState !== state || state.controller !== controller) return;
       acc += delta;
       aEl.textContent = acc;
@@ -4586,7 +5642,7 @@ function canvasLightboxPin(state) {
   const btn = state.pinBtnEl;
   if (btn) { if (btn.disabled) return; btn.disabled = true; btn.textContent = 'Pinning…'; }
   const title = canvasLightboxTitleFromFileName(state.file && state.file.display_name);
-  canvasPinAiConversation({ title, thread: state.thread.slice(), conceptId: state.conceptId, sourceItemId: state.itemId, grounding: '', created_at: Date.now() });
+  canvasPinAiConversation({ title, thread: state.thread.slice(), askScope: state.scope, sourceItemId: state.itemId, grounding: '', created_at: Date.now() });
   if (btn) { btn.disabled = false; btn.textContent = '📌 Pin to canvas'; }
 }
 
@@ -4614,7 +5670,7 @@ async function canvasUploadFile(state, file, worldX, worldY) {
   fd.append('file', file);
   let row;
   try {
-    row = await api.upload(`/concepts/${state.conceptId}/canvas/files`, fd);
+    row = await api.upload(`${canvasLayoutApiBase(state)}/canvas/files`, fd);
   } catch (e) {
     if (canvasState !== state) return; // canvas closed while uploading — nothing left to update
     const entry = state.itemsById.get(itemId);
@@ -4652,7 +5708,7 @@ function canvasPollFile(state, fileId, itemId, attempt = 0) {
     if (!state.itemsById.has(itemId)) return; // item removed (deleted) while converting
     let data;
     try {
-      data = await api.get(`/concepts/${state.conceptId}/canvas`);
+      data = await api.get(`${canvasLayoutApiBase(state)}/canvas`);
     } catch (e) {
       // transient failure — keep trying up to the attempt cap rather than
       // giving up on a single blip
@@ -4691,18 +5747,32 @@ function canvasHandleFileInputChange(state, fileList) {
 
 function canvasWireDropUpload(state) {
   const scrollEl = state.scrollEl;
+  // G9: an enter/leave DEPTH COUNTER instead of an exact-target dragleave
+  // check — dragging over nested children (item cards, drawings) fires a
+  // dragleave/dragenter pair on each child boundary crossing, which made the
+  // old exact-target check flicker the highlight on/off. The highlight only
+  // toggles when the counter actually reaches/leaves zero.
+  let dragDepth = 0;
+  const onDragEnter = (e) => {
+    if (canvasState !== state) return;
+    e.preventDefault();
+    dragDepth++;
+    scrollEl.classList.add('canvas-drop-hint');
+  };
   const onDragOver = (e) => {
     if (canvasState !== state) return;
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-    scrollEl.classList.add('canvas-drop-hint');
   };
   const onDragLeave = (e) => {
-    if (e.target === scrollEl) scrollEl.classList.remove('canvas-drop-hint');
+    if (canvasState !== state) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) scrollEl.classList.remove('canvas-drop-hint');
   };
   const onDrop = (e) => {
     if (canvasState !== state) return;
     e.preventDefault();
+    dragDepth = 0;
     scrollEl.classList.remove('canvas-drop-hint');
     const files = e.dataTransfer && e.dataTransfer.files ? Array.from(e.dataTransfer.files) : [];
     if (!files.length) return;
@@ -4712,10 +5782,12 @@ function canvasWireDropUpload(state) {
       canvasUploadFile(state, f, world.x - 180, world.y - 130);
     });
   };
+  scrollEl.addEventListener('dragenter', onDragEnter);
   scrollEl.addEventListener('dragover', onDragOver);
   scrollEl.addEventListener('dragleave', onDragLeave);
   scrollEl.addEventListener('drop', onDrop);
   return () => {
+    scrollEl.removeEventListener('dragenter', onDragEnter);
     scrollEl.removeEventListener('dragover', onDragOver);
     scrollEl.removeEventListener('dragleave', onDragLeave);
     scrollEl.removeEventListener('drop', onDrop);
@@ -4752,6 +5824,35 @@ function canvasPanToItem(state, itemId) {
   canvasAnimatePan(state, rect.width / 2 - cx * state.scale, rect.height / 2 - cy * state.scale);
 }
 
+// Fix 2 (global search → canvas text/sticky): same "center it" pan as
+// canvasPanToItem, but for a whiteboard DRAWING (text-box/sticky) rather than
+// a placed item — mirrors it exactly, just resolving world bounds via
+// canvasDrawingBounds instead of an item's {x,y,w,h}. Briefly flashes the
+// drawing's SVG node (a plain inline-style toggle, no new CSS) so the pan
+// destination is unambiguous.
+function canvasPanToDrawing(state, drawingId) {
+  const d = drawingId != null ? (state.drawings || []).find((x) => x.id === drawingId) : null;
+  if (!d) { ui.toast('Not on this canvas', 'error'); return; }
+  const bounds = canvasDrawingBounds(d);
+  if (!bounds) { ui.toast('Not on this canvas', 'error'); return; }
+  const rect = state.scrollEl.getBoundingClientRect();
+  const cx = bounds.x + bounds.w / 2, cy = bounds.y + bounds.h / 2;
+  canvasAnimatePan(state, rect.width / 2 - cx * state.scale, rect.height / 2 - cy * state.scale);
+  const node = state.vectorNodes && state.vectorNodes.get(drawingId);
+  if (node) {
+    const prevFilter = node.style.filter;
+    node.style.filter = 'drop-shadow(0 0 0 transparent)';
+    requestAnimationFrame(() => {
+      node.style.transition = 'filter .25s ease';
+      node.style.filter = 'drop-shadow(0 0 10px var(--primary, #7A5AF8))';
+      setTimeout(() => {
+        node.style.filter = prevFilter || '';
+        setTimeout(() => { node.style.transition = ''; }, 260);
+      }, 1200);
+    });
+  }
+}
+
 // Round 8 item 3: rename the lesson's own note (item #0) from the Files
 // sidebar's rename pencil — same endpoint/field the reader's title-edit uses
 // (PATCH /concepts/:id, {display_name}), then fans the new name out via the
@@ -4784,7 +5885,7 @@ function canvasRenameFileModal(state, fileId) {
     onSubmit: async (root) => {
       const name = root.querySelector('#f-canvas-rename').value.trim();
       if (!name) throw new Error('Please enter a name.');
-      const updated = await api.patch(`/canvas-files/${file.id}`, { display_name: name });
+      const updated = await api.patch(`/${canvasFileMediaBase(state)}/${file.id}`, { display_name: name });
       if (canvasState !== state) return;
       state.filesById.set(updated.id, updated);
       const idx = state.files.findIndex((f) => f.id === updated.id);
@@ -4806,7 +5907,7 @@ function canvasConfirmDeleteFile(state, file, itemId) {
     message: `This removes "${file.display_name}" from this lesson's canvas. This can't be undone.`,
     confirmLabel: 'Remove',
     onConfirm: async () => {
-      await api.del(`/canvas-files/${file.id}`);
+      await api.del(`/${canvasFileMediaBase(state)}/${file.id}`);
       if (canvasState !== state) return;
       state.filesById.delete(file.id);
       state.files = state.files.filter((f) => f.id !== file.id);
@@ -4831,14 +5932,30 @@ function canvasConfirmDeleteFile(state, file, itemId) {
 function canvasRequestDeleteItem(state, itemId) {
   const entry = state.itemsById.get(itemId);
   if (!entry) return;
-  if (entry.refKind === 'note') return;
-  if (entry.refKind === 'uploading' || entry.refKind === 'ai') {
+  if (entry.refKind === 'note' || entry.refKind === 'revision-pdf') return;
+  if (entry.refKind === 'uploading') {
+    // A transient upload placeholder — remove silently (no confirm).
     canvasRemoveItemFromDom(state, itemId);
     markCanvasDirty(state);
-    // Round 7: an 'ai' item may also be listed in the Files sidebar's
-    // "Conversations" group (deleted from the canvas ✕ or from that row) —
-    // keep the list in sync either way.
     canvasRenderFileList(state);
+    return;
+  }
+  if (entry.refKind === 'ai') {
+    // B8: a pinned AI conversation can hold real, unrecoverable work (its
+    // thread lives only in the layout JSON) — confirm before dropping it,
+    // matching how file cards confirm.
+    ui.confirmModal({
+      title: 'Delete conversation?',
+      message: 'This removes the pinned AI conversation from the canvas. This can’t be undone.',
+      confirmLabel: 'Delete',
+      onConfirm: async () => {
+        canvasRemoveItemFromDom(state, itemId);
+        markCanvasDirty(state);
+        // Round 7: an 'ai' item may also be listed in the Files sidebar's
+        // "Conversations" group — keep the list in sync.
+        canvasRenderFileList(state);
+      },
+    });
     return;
   }
   canvasConfirmDeleteFile(state, entry.refObj, itemId);
@@ -4850,6 +5967,109 @@ function canvasRequestDeleteFile(state, fileId) {
   const file = state.filesById.get(Number(fileId));
   if (!file) return;
   canvasConfirmDeleteFile(state, file, canvasFindItemIdByRef(state, 'canvas-file', file.id));
+}
+
+/* ---- Selection Core: Delete/Backspace over a (possibly multi-)selection ----
+   Splices every selected drawing out in one history snapshot + removes every
+   selected non-note item, choosing a confirm strategy that avoids a "confirm
+   storm" on a big marquee delete:
+     - a single selected element reuses the existing single-item/drawing path
+       (canvasRequestDeleteItem already has the right per-kind confirm rules);
+     - multiple elements where none is a canvas-file delete immediately
+       (drawings are undoable via Ctrl+Z; ai/uploading items have no server
+       row to lose);
+     - multiple elements where at least one IS a canvas-file show ONE
+       confirm, then delete everything.
+   A selected `note` item is filtered out up front — it is never deletable —
+   so a solely-selected note + Delete stays the exact same no-op it always
+   was (canvasRequestDeleteItem's own `if (entry.refKind === 'note') return;`
+   never even gets a chance to differ). */
+
+// Splices the given drawing ids out of state.drawings in ONE history
+// snapshot (so a multi-drawing delete is a single Ctrl+Z step), repaints and
+// persists. Also used for the "exactly one drawing selected" case.
+function canvasDeleteDrawingsNow(state, drawingIds) {
+  if (!drawingIds || !drawingIds.length) return;
+  const idSet = new Set(drawingIds);
+  canvasSnapshotHistory(state);
+  state.drawings = state.drawings.filter((d) => !idSet.has(d.id));
+  drawingIds.forEach((id) => state.selection.drawings.delete(id));
+  canvasRenderVectors(state);
+  canvasRenderToolbar(state);
+  markCanvasDirty(state);
+}
+
+// A selected `note` item can never be deleted; if one rode along in a
+// multi-selection alongside deletable elements, strip it from the selection
+// too once the rest is gone, so "clear the selection after" holds even for a
+// mixed selection (a solely-selected note is never routed through this —
+// see canvasDeleteSelection's early return).
+function canvasStripUndeletableSelection(state) {
+  state.selection.items.forEach((id) => {
+    const en = state.itemsById.get(id);
+    if (en && (en.refKind === 'note' || en.refKind === 'revision-pdf')) {
+      en.el.classList.remove('selected');
+      state.selection.items.delete(id);
+    }
+  });
+}
+
+function canvasDeleteSelection(state) {
+  const drawingIds = Array.from(state.selection.drawings);
+  const itemIds = Array.from(state.selection.items).filter((id) => {
+    const en = state.itemsById.get(id);
+    return en && en.refKind !== 'note' && en.refKind !== 'revision-pdf';
+  });
+  const total = drawingIds.length + itemIds.length;
+  if (!total) return; // nothing deletable selected (e.g. only the note) — same no-op as before
+
+  if (total === 1) {
+    if (itemIds.length === 1) { canvasRequestDeleteItem(state, itemIds[0]); return; }
+    canvasDeleteDrawingsNow(state, drawingIds); // the lone selected element is a drawing
+    return;
+  }
+
+  const hasFile = itemIds.some((id) => {
+    const en = state.itemsById.get(id);
+    return en && en.refKind === 'canvas-file';
+  });
+
+  if (!hasFile) {
+    canvasDeleteDrawingsNow(state, drawingIds);
+    itemIds.forEach((id) => canvasRemoveItemFromDom(state, id));
+    canvasStripUndeletableSelection(state);
+    canvasRenderFileList(state);
+    return;
+  }
+
+  ui.confirmModal({
+    title: 'Delete selection?',
+    message: `Delete ${total} selected item(s)? Files are removed permanently.`,
+    confirmLabel: 'Delete',
+    onConfirm: async () => {
+      canvasDeleteDrawingsNow(state, drawingIds);
+      for (const id of itemIds) {
+        const en = state.itemsById.get(id);
+        if (!en) continue;
+        if (en.refKind === 'canvas-file') {
+          const file = en.refObj;
+          try {
+            await api.del(`/${canvasFileMediaBase(state)}/${file.id}`);
+          } catch (e) {
+            console.error('Canvas: failed to delete file', e);
+            continue; // leave this one on the board rather than silently losing track of it
+          }
+          if (canvasState !== state) return;
+          state.filesById.delete(file.id);
+          state.files = state.files.filter((f) => f.id !== file.id);
+        }
+        canvasRemoveItemFromDom(state, id);
+      }
+      canvasStripUndeletableSelection(state);
+      canvasRenderFileList(state);
+      ui.toast('Selection deleted');
+    },
+  });
 }
 
 /* ---- world transform: screen <-> world, pan, zoom, fit-to-view (§3) ---- */
@@ -4926,6 +6146,209 @@ function canvasStartPan(state, e) {
   scrollEl.addEventListener('pointercancel', onUp);
 }
 
+/* ---- Selection Core: marquee (rubber-band) select ----
+   A left-drag starting on truly empty canvas in select mode (not on an item,
+   not on a hit drawing, not Space-held) now draws a marquee instead of
+   panning (canvasWireEvents' onPointerDown routes here). Drawn in SCREEN
+   space as a plain DOM rect over #canvas-scroll (mirrors the reader/lightbox
+   snip marquee pattern — app.js ~5063), so it needs no world-space math while
+   dragging; only the final rect is converted to world coords once, on
+   release, to test intersection against every item/drawing. */
+function canvasStartMarqueeSelect(state, e) {
+  e.preventDefault();
+  canvasClearSelection(state); // a plain click (no drag) just clears — matches the old empty-click behavior
+  const scrollEl = state.scrollEl;
+  const scrollRect = scrollEl.getBoundingClientRect();
+  const startX = e.clientX - scrollRect.left, startY = e.clientY - scrollRect.top;
+  const marquee = document.createElement('div');
+  marquee.className = 'canvas-marquee';
+  scrollEl.appendChild(marquee);
+  let moved = false;
+  let last = { x0: startX, y0: startY, x1: startX, y1: startY };
+  try { scrollEl.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+  const paint = (curX, curY) => {
+    const x0 = Math.min(startX, curX), x1 = Math.max(startX, curX);
+    const y0 = Math.min(startY, curY), y1 = Math.max(startY, curY);
+    marquee.style.left = x0 + 'px';
+    marquee.style.top = y0 + 'px';
+    marquee.style.width = Math.max(0, x1 - x0) + 'px';
+    marquee.style.height = Math.max(0, y1 - y0) + 'px';
+    last = { x0, y0, x1, y1 };
+  };
+  const onMove = (ev) => {
+    const cx = ev.clientX - scrollRect.left, cy = ev.clientY - scrollRect.top;
+    if (Math.abs(cx - startX) > CANVAS_MARQUEE_THRESHOLD || Math.abs(cy - startY) > CANVAS_MARQUEE_THRESHOLD) moved = true;
+    paint(cx, cy);
+  };
+  const cleanup = () => {
+    scrollEl.removeEventListener('pointermove', onMove);
+    scrollEl.removeEventListener('pointerup', finishUp);
+    scrollEl.removeEventListener('pointercancel', cleanup);
+    marquee.remove();
+  };
+  const finishUp = () => {
+    cleanup();
+    if (canvasState === state && moved) canvasApplyMarqueeSelection(state, last);
+  };
+  scrollEl.addEventListener('pointermove', onMove);
+  scrollEl.addEventListener('pointerup', finishUp);
+  scrollEl.addEventListener('pointercancel', cleanup);
+}
+
+// Converts the marquee's final screen rect (relative to #canvas-scroll) to a
+// world rect and additively selects every item + box-selectable drawing
+// whose bounds intersect it (selection was already cleared at drag-start).
+function canvasApplyMarqueeSelection(state, screenRect) {
+  const p0 = canvasScreenToWorld(state, screenRect.x0, screenRect.y0);
+  const p1 = canvasScreenToWorld(state, screenRect.x1, screenRect.y1);
+  const wx0 = Math.min(p0.x, p1.x), wx1 = Math.max(p0.x, p1.x);
+  const wy0 = Math.min(p0.y, p1.y), wy1 = Math.max(p0.y, p1.y);
+  const intersects = (ax, ay, aw, ah) => ax < wx1 && ax + aw > wx0 && ay < wy1 && ay + ah > wy0;
+
+  state.itemsById.forEach((entry, id) => {
+    const d = entry.data;
+    if (intersects(d.x, d.y, d.w, d.h)) canvasSelectItem(state, id, { additive: true });
+  });
+  let addedDrawing = false;
+  (state.drawings || []).forEach((d) => {
+    if (!canvasDrawingIsBoxSelectable(d)) return;
+    const b = canvasDrawingBounds(d);
+    if (b && intersects(b.x, b.y, b.w, b.h)) { state.selection.drawings.add(d.id); addedDrawing = true; }
+  });
+  if (addedDrawing) canvasRenderVectors(state); // repaint to show the selected-drawing halos
+}
+
+/* ---- Clipboard core (round 10 Part 2 — CANVAS.md §14) ----
+   Native `copy`/`paste` DOM events only (never a keydown Ctrl+C/V branch) —
+   those events simply don't fire while an editable element (a sticky/text
+   drawing's inline editor, a form field) is focused, so native text
+   copy/paste inside them is never hijacked; canvasClipboardBlocked() below is
+   a belt-and-braces check on top of that. Only drawings + pinned 'ai' cards
+   are ever copyable — file-backed items (note/canvas-file/uploading) are
+   deliberately excluded (CANVAS.md §2/§13: they're durable server rows, not
+   board doodles, and "copy" for them isn't a meaningful concept here). */
+
+function canvasClipboardBlocked(e) {
+  const isEditableEl = (el) => !!el && el.nodeType === 1
+    && (el.isContentEditable || ['input', 'textarea', 'select'].includes((el.tagName || '').toLowerCase()));
+  return isEditableEl(document.activeElement) || isEditableEl(e.target);
+}
+
+// Base64 data: URL -> a real File (never a bare Blob) so canvasUploadFile's
+// FormData append always carries a filename with a valid extension — the
+// backend validates canvas uploads BY EXTENSION (CANVAS.md §5), not MIME.
+function canvasDataUrlToFile(dataUrl, filename) {
+  const m = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(dataUrl || '');
+  if (!m) return null;
+  const mime = m[1] || 'image/png';
+  let bytes;
+  if (m[2]) {
+    const bin = atob(m[3]);
+    bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  } else {
+    bytes = new TextEncoder().encode(decodeURIComponent(m[3]));
+  }
+  return new File([bytes], filename, { type: mime });
+}
+
+// Paste path #2/#3 (a stashed snip crop, or a real OS-clipboard screenshot) —
+// both are just "upload this image at roughly the pointer/viewport", reusing
+// the existing upload pipeline (placeholder card -> POST -> real canvas-file).
+function canvasPasteImageDataUrl(state, dataUrl, filename) {
+  const file = canvasDataUrlToFile(dataUrl, filename || `pasted-${Date.now()}.png`);
+  if (!file) return;
+  const center = canvasViewportCenterWorld(state);
+  canvasUploadFile(state, file, center.x - 180, center.y - 130);
+}
+
+// Paste path #1: an in-app copy of a selection (drawings + pinned 'ai' cards).
+// Every pasted element gets a FRESH id (canvasNewItemId/canvasNewDrawingId —
+// never reused, so there's no risk of colliding with a still-live original or
+// an earlier paste of the same clipboard), offset by +24/+24 world px so a
+// paste never perfectly overlaps its source, and the whole pasted set becomes
+// the new selection so it can be dragged immediately.
+function canvasPasteSelection(state, clip) {
+  const items = clip.items || [];
+  const drawings = clip.drawings || [];
+  if (!items.length && !drawings.length) return;
+
+  canvasClearSelection(state);
+  const idMap = new Map(); // old item id -> new item id (only 'ai' items are ever in `items`)
+  const pastedItemIds = [];
+
+  items.forEach((oldItem) => {
+    const newId = canvasNewItemId();
+    idMap.set(oldItem.id, newId);
+    const ref = JSON.parse(JSON.stringify(oldItem.ref));
+    if (ref.type === 'ai') {
+      // Keep sourceItemId only if that source item still exists on THIS
+      // board (so the pasted copy still nests under it in the Files
+      // sidebar); otherwise it's an orphan, same as any convo whose source
+      // was separately deleted. No new connector is drawn on paste either way.
+      ref.sourceItemId = (ref.sourceItemId && state.itemsById.has(ref.sourceItemId)) ? ref.sourceItemId : null;
+    }
+    canvasMountItem(state, {
+      id: newId, ref,
+      x: oldItem.x + 24, y: oldItem.y + 24, w: oldItem.w, h: oldItem.h,
+      z: canvasNextZ(state),
+    });
+    pastedItemIds.push(newId);
+  });
+
+  const pastedDrawingIds = [];
+  if (drawings.length) {
+    canvasSnapshotHistory(state); // one snapshot for the whole paste — one Ctrl+Z step
+    const newDrawings = [];
+    drawings.forEach((oldD) => {
+      const d = JSON.parse(JSON.stringify(oldD));
+      d.id = canvasNewDrawingId();
+      if (d.type === 'connector') {
+        // Kept ONLY if BOTH endpoints were themselves copied (i.e. both are
+        // pinned 'ai' items in `items` above) — remap to the fresh item ids.
+        // Otherwise drop it rather than paste a dangling connector. In
+        // practice, since only 'ai' items are copyable, a connector usually
+        // links a file -> ai card, so most connectors are dropped here — that
+        // matches CANVAS.md §14.
+        const from = idMap.get(oldD.from), to = idMap.get(oldD.to);
+        if (!from || !to) return;
+        d.from = from; d.to = to;
+      } else if (d.type === 'line' || d.type === 'arrow') {
+        d.x1 += 24; d.y1 += 24; d.x2 += 24; d.y2 += 24;
+      } else if (d.type === 'pen') {
+        d.points = (d.points || []).map((p) => ({ x: p.x + 24, y: p.y + 24 }));
+      } else {
+        d.x += 24; d.y += 24;
+      }
+      newDrawings.push(d);
+    });
+    state.drawings = (state.drawings || []).concat(newDrawings);
+    newDrawings.forEach((d) => pastedDrawingIds.push(d.id));
+  }
+
+  pastedItemIds.forEach((id) => canvasSelectItem(state, id, { additive: true }));
+  pastedDrawingIds.forEach((id) => state.selection.drawings.add(id));
+  if (drawings.length) canvasRenderVectors(state); // repaint: new drawings + their selected-halo + connector removal, in one pass
+
+  markCanvasDirty(state);
+  if (pastedItemIds.length) canvasRenderFileList(state); // a pasted 'ai' card needs to show up in the sidebar
+}
+
+// Round 10 Part 2 (pinch-zoom, CANVAS.md §14): best-effort force-end of
+// whichever single-pointer gesture (pan / marquee / shape-draw / sticky-draw
+// / drawing-manipulate — all of them capture on state.scrollEl and listen for
+// 'pointercancel' there, cleaning up unconditionally, i.e. none of them
+// filter by pointerId) or item drag/resize (captures on the item's own
+// element instead — tracked in state._activeItemDragEl while live) is mid-
+// flight, so a second touch point landing mid-drag doesn't fight the pinch.
+function canvasCancelActiveGesture(state) {
+  try { state.scrollEl.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, cancelable: true })); } catch (e) { /* ignore */ }
+  if (state._activeItemDragEl) {
+    try { state._activeItemDragEl.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, cancelable: true })); } catch (e) { /* ignore */ }
+    state._activeItemDragEl = null;
+  }
+}
+
 function canvasWireEvents(state) {
   const scrollEl = state.scrollEl;
 
@@ -4976,11 +6399,25 @@ function canvasWireEvents(state) {
         }
         state._lastDrawingClick = { id: hitDrawing.id, t: now };
       }
+      // Selection Core: Shift-click ONLY toggles membership (no manipulate),
+      // mirroring the item pointerdown above. A plain click that's already
+      // part of a live multi-selection keeps it (so the drag below moves
+      // everyone); otherwise this drawing becomes the sole selection.
+      if (e.shiftKey) {
+        canvasSelectDrawing(state, hitDrawing.id, { additive: true });
+        return;
+      }
+      const keepMulti = state.selection.drawings.has(hitDrawing.id)
+        && (state.selection.drawings.size > 1 || state.selection.items.size > 0);
+      if (!keepMulti) canvasSelectDrawing(state, hitDrawing.id);
       canvasStartDrawingManipulate(state, e, hitDrawing, selWpt);
       return;
     }
-    canvasClearSelection(state);
-    canvasStartPan(state, e); // drag on empty canvas (or space-drag) pans
+    // Selection Core: empty canvas now marquee-selects by default; Space-held
+    // drag still pans (matches middle-mouse, which already works over items
+    // too — see the e.button===1 branch above).
+    if (state.spaceDown) { canvasStartPan(state, e); return; }
+    canvasStartMarqueeSelect(state, e);
   };
   scrollEl.addEventListener('pointerdown', onPointerDown);
 
@@ -4992,6 +6429,53 @@ function canvasWireEvents(state) {
     canvasZoomAt(state, factor, e.clientX - rect.left, e.clientY - rect.top);
   };
   scrollEl.addEventListener('wheel', onWheel, { passive: false });
+
+  /* ---- pinch-zoom (round 10 Part 2 — CANVAS.md §14) ----
+     A two-pointer touch gesture, tracked independently of the single-pointer
+     gestures above. Listened for in the CAPTURE phase on scrollEl so a
+     pointerdown is seen here even though those gestures' own handlers call
+     e.stopPropagation() during the (later) bubble phase, and even when the
+     pointer lands on an item card (whose own pointerdown handler lives on
+     the item element, a descendant of scrollEl — capture always runs before
+     a descendant's own listener gets the event). */
+  const pinchPointers = new Map(); // pointerId -> {x, y} in viewport (clientX/Y) coords
+  let pinchDist = null; // distance (px) at the last processed tick, or null when not (yet) pinching
+
+  const onPinchPointerDown = (e) => {
+    if (canvasState !== state) return;
+    if (pinchPointers.size >= 2) { e.stopPropagation(); return; } // a 3rd+ pointer never starts its own gesture either
+    pinchPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinchPointers.size === 2) {
+      canvasCancelActiveGesture(state); // end whatever single-pointer gesture pointer #1 may already be mid-flight on
+      const pts = Array.from(pinchPointers.values());
+      pinchDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || null;
+      e.stopPropagation(); // this 2nd pointer must not ALSO start its own select/marquee/drag
+      if (e.cancelable) e.preventDefault();
+    }
+  };
+  const onPinchPointerMove = (e) => {
+    if (canvasState !== state || !pinchPointers.has(e.pointerId)) return;
+    pinchPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinchPointers.size !== 2 || !pinchDist) return;
+    e.stopPropagation();
+    if (e.cancelable) e.preventDefault();
+    const pts = Array.from(pinchPointers.values());
+    const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    if (!dist) return;
+    const midX = (pts[0].x + pts[1].x) / 2, midY = (pts[0].y + pts[1].y) / 2;
+    const rect = scrollEl.getBoundingClientRect();
+    canvasZoomAt(state, dist / pinchDist, midX - rect.left, midY - rect.top); // zoom toward the pinch midpoint
+    pinchDist = dist;
+  };
+  const onPinchPointerEnd = (e) => {
+    if (!pinchPointers.has(e.pointerId)) return;
+    pinchPointers.delete(e.pointerId);
+    if (pinchPointers.size < 2) pinchDist = null; // exits pinch mode — the next pointerdown starts a fresh, ordinary gesture
+  };
+  scrollEl.addEventListener('pointerdown', onPinchPointerDown, { capture: true });
+  scrollEl.addEventListener('pointermove', onPinchPointerMove, { capture: true });
+  scrollEl.addEventListener('pointerup', onPinchPointerEnd, { capture: true });
+  scrollEl.addEventListener('pointercancel', onPinchPointerEnd, { capture: true });
 
   const isTyping = () => {
     const a = document.activeElement;
@@ -5018,9 +6502,9 @@ function canvasWireEvents(state) {
       canvasConnectorCancel(state);
       return;
     }
-    if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedId) {
+    if ((e.key === 'Delete' || e.key === 'Backspace') && (state.selection.items.size || state.selection.drawings.size)) {
       e.preventDefault();
-      canvasRequestDeleteItem(state, state.selectedId);
+      canvasDeleteSelection(state);
       return;
     }
   };
@@ -5030,13 +6514,87 @@ function canvasWireEvents(state) {
   document.addEventListener('keydown', onKeyDown);
   document.addEventListener('keyup', onKeyUp);
 
+  /* ---- clipboard: copy/paste of the selection (round 10 Part 2 — CANVAS.md
+     §14). Native `copy`/`paste` events — NOT a keydown branch — so they never
+     fire while an editable element is focused; isTyping() (already defined
+     above) plus an event-target check (canvasClipboardBlocked) is belt-and-
+     braces on top of that. */
+  const onCopy = (e) => {
+    if (canvasState !== state || isTyping() || canvasClipboardBlocked(e)) return;
+    const hasSelection = state.selection.items.size || state.selection.drawings.size;
+    if (!hasSelection) return; // nothing selected — let native copy proceed
+    const copiedItemIds = new Set();
+    const items = [];
+    state.selection.items.forEach((id) => {
+      const entry = state.itemsById.get(id);
+      if (entry && entry.refKind === 'ai') { items.push(JSON.parse(JSON.stringify(entry.data))); copiedItemIds.add(id); }
+      // note/canvas-file/uploading items are deliberately excluded — CANVAS.md §14.
+    });
+    const drawings = [];
+    const copiedDrawingIds = new Set();
+    state.selection.drawings.forEach((id) => {
+      const d = (state.drawings || []).find((x) => x.id === id);
+      if (d) { drawings.push(JSON.parse(JSON.stringify(d))); copiedDrawingIds.add(id); }
+    });
+    // A connector between two copied 'ai' cards travels with them automatically —
+    // connectors are never individually click/marquee-selectable (CANVAS.md
+    // §13), so this is the only way one is ever part of a copy.
+    if (copiedItemIds.size > 1) {
+      (state.drawings || []).forEach((d) => {
+        if (d.type === 'connector' && !copiedDrawingIds.has(d.id) && copiedItemIds.has(d.from) && copiedItemIds.has(d.to)) {
+          drawings.push(JSON.parse(JSON.stringify(d)));
+        }
+      });
+    }
+    canvasClipboard = { kind: 'selection', items, drawings };
+    e.preventDefault();
+  };
+  const onPaste = (e) => {
+    if (canvasState !== state || isTyping() || canvasClipboardBlocked(e)) return;
+    if (canvasClipboard && canvasClipboard.kind === 'selection') {
+      e.preventDefault();
+      canvasPasteSelection(state, canvasClipboard);
+      return;
+    }
+    if (canvasClipboard && canvasClipboard.kind === 'image') {
+      e.preventDefault();
+      canvasPasteImageDataUrl(state, canvasClipboard.dataUrl);
+      return;
+    }
+    // Path #3: a real OS-clipboard screenshot (no prior in-app copy/snip).
+    const dt = e.clipboardData;
+    const dtItems = dt && dt.items;
+    if (!dtItems) return;
+    for (let i = 0; i < dtItems.length; i++) {
+      const it = dtItems[i];
+      if (it.kind === 'file' && it.type && it.type.indexOf('image/') === 0) {
+        const blob = it.getAsFile();
+        if (!blob) continue;
+        e.preventDefault();
+        const ext = it.type.split('/')[1] || 'png';
+        const file = /\.[a-z0-9]+$/i.test(blob.name || '') ? blob : new File([blob], `pasted-${Date.now()}.${ext}`, { type: it.type });
+        const center = canvasViewportCenterWorld(state);
+        canvasUploadFile(state, file, center.x - 180, center.y - 130);
+        return;
+      }
+    }
+  };
+  document.addEventListener('copy', onCopy);
+  document.addEventListener('paste', onPaste);
+
   const removeDropUpload = canvasWireDropUpload(state);
 
   state._cleanup = () => {
     scrollEl.removeEventListener('pointerdown', onPointerDown);
     scrollEl.removeEventListener('wheel', onWheel);
+    scrollEl.removeEventListener('pointerdown', onPinchPointerDown, { capture: true });
+    scrollEl.removeEventListener('pointermove', onPinchPointerMove, { capture: true });
+    scrollEl.removeEventListener('pointerup', onPinchPointerEnd, { capture: true });
+    scrollEl.removeEventListener('pointercancel', onPinchPointerEnd, { capture: true });
     document.removeEventListener('keydown', onKeyDown);
     document.removeEventListener('keyup', onKeyUp);
+    document.removeEventListener('copy', onCopy);
+    document.removeEventListener('paste', onPaste);
     removeDropUpload();
     canvasCloseLightbox();
   };
@@ -5068,7 +6626,7 @@ async function canvasFlushSave(state) {
   if (!state.dirty) return;
   state.dirty = false;
   try {
-    await api.put(`/concepts/${state.conceptId}/canvas`, { data: canvasLayoutDoc(state) });
+    await api.put(`${canvasLayoutApiBase(state)}/canvas`, { data: canvasLayoutDoc(state) });
   } catch (e) {
     console.error('Canvas: failed to save layout', e);
     if (canvasState === state) state.dirty = true; // retry on the next change
@@ -5083,12 +6641,19 @@ function canvasBuildItems(state, layout) {
     layout.items.forEach((it) => canvasMountItem(state, it));
     return;
   }
-  // Auto-place: note #0 top-left (only once compiled — CANVAS.md §2), then
-  // every canvas file flowing right in rows. Persisted immediately so the
-  // next open reuses these positions instead of re-auto-placing.
+  // Auto-place: item #0 top-left, then every canvas file flowing right in
+  // rows. Persisted immediately so the next open reuses these positions
+  // instead of re-auto-placing. Item #0 is the lesson's compiled note (only
+  // once compiled — CANVAS.md §2) for a concept-scope board, or the exam's
+  // revision PDF (always, regardless of status — it's never dropped) for a
+  // revision-scope board.
   let z = 1;
   const items = [];
-  if (state.note && state.note.status === 'compiled') {
+  if (canvasIsRevisionScope(state)) {
+    if (state.revision) {
+      items.push({ id: canvasNewItemId(), ref: { type: 'revision-pdf', id: state.revision.id }, x: 40, y: 40, w: 520, h: 700, z: z++ });
+    }
+  } else if (state.note && state.note.status === 'compiled') {
     items.push({ id: canvasNewItemId(), ref: { type: 'note', id: state.note.id }, x: 40, y: 40, w: 520, h: 700, z: z++ });
   }
   const startX = items.length ? 620 : 40;
@@ -5154,17 +6719,23 @@ async function renderCanvasView(courseId, conceptId, origin) {
   const files = canvasData.files || [];
 
   // Schedule origin: the left sidebar lists the upcoming schedule (cross-course).
+  // /schedule/upcoming now also carries synthetic kind:'revision' rows (Build
+  // 12 Phase 4, whole-exam — no single concept_id/note_id); this cross-course
+  // lesson list only knows how to render per-concept lessons, so filter those
+  // out rather than let them render as a broken/unselectable lesson row.
   let scheduleItems = [];
   if (origin === 'schedule') {
     try {
       const to = new Date(Date.now() + 120 * 864e5).toISOString().slice(0, 10);
-      scheduleItems = await api.get(`/schedule/upcoming?from=${todayISO()}&to=${to}`);
+      scheduleItems = (await api.get(`/schedule/upcoming?from=${todayISO()}&to=${to}`))
+        .filter((it) => it.kind !== 'revision');
     } catch (e) { scheduleItems = []; }
   }
 
   view.innerHTML = canvasShellHtml(courseId, activeConceptId, concepts, notesByConceptId, activeConcept, activeNote, files, origin, scheduleItems);
 
   const state = {
+    scope: { kind: 'concept', id: activeConceptId }, // see the canvasState comment above
     courseId: Number(courseId),
     conceptId: activeConceptId,
     concept: activeConcept || null,
@@ -5178,7 +6749,7 @@ async function renderCanvasView(courseId, conceptId, origin) {
     files,
     filesById: new Map(files.map((f) => [f.id, f])),
     itemsById: new Map(),
-    selectedId: null,
+    selection: { items: new Set(), drawings: new Set() }, // Selection Core (generalizes the old single selectedId)
     tx: 0, ty: 0, scale: 1,
     drawings: (canvasData.layout && canvasData.layout.drawings) || [], // Phase 3 owns this
     // ---- Phase 3: vector drawing layer ----
@@ -5198,9 +6769,18 @@ async function renderCanvasView(courseId, conceptId, origin) {
     fileSearch: '',
     fileSort: 'newest',
     _panRaf: null,
+    _activeItemDragEl: null, // round 10 Part 2: see the canvasState comment above
     _cleanup: null,
   };
   canvasState = state;
+  // Back-compat shim: nothing in this codebase reads state.selectedId any
+  // more (every consumer now goes through state.selection), but keep a
+  // read-only getter — mirrors the old single-selection semantics (the sole
+  // selected item id, or null when empty/multi/a-drawing-is-selected).
+  Object.defineProperty(state, 'selectedId', {
+    get() { return (state.selection.items.size === 1 && !state.selection.drawings.size) ? Array.from(state.selection.items)[0] : null; },
+    configurable: true,
+  });
 
   canvasBuildItems(state, canvasData.layout);
   canvasRenderVectors(state); // Phase 3: paint any saved drawings/connectors now that itemsById is populated
@@ -5224,6 +6804,16 @@ async function renderCanvasView(courseId, conceptId, origin) {
     canvasApplyTransform(state);
   } else {
     canvasFitToView(state, false); // computed default — not itself a user change worth a write
+  }
+
+  // Fix 2 (global search → canvas text/sticky): consume a pending pan request
+  // left by selectSearchResult, if it targets THIS concept — one-shot, nulled
+  // immediately so a stale request can't fire on a later, unrelated canvas
+  // open (e.g. the user navigates elsewhere before this fetch resolves).
+  if (canvasPendingFocus && canvasPendingFocus.conceptId === activeConceptId) {
+    const targetDrawingId = canvasPendingFocus.drawingId;
+    canvasPendingFocus = null;
+    canvasPanToDrawing(state, targetDrawingId);
   }
 
   // File-container controls (Phase 2b §1/§2): search/sort re-render just the
@@ -5253,19 +6843,164 @@ async function renderCanvasView(courseId, conceptId, origin) {
       fileInput.value = '';
     });
   }
+  // F3: the empty-canvas hint's own "+ Add file" reuses the same hidden input
+  // (never rebuilt across lesson switches, so this listener stays attached).
+  const emptyAddFileBtn = view.querySelector('#canvas-empty-add-file-btn');
+  if (emptyAddFileBtn && fileInput) emptyAddFileBtn.addEventListener('click', () => fileInput.click());
 
   // Resizable sidebars (round 7 Part 6) — wired once at mount; canvasSwitchLesson
   // rebuilds only the board contents, never the shell, so these stay attached.
   view.querySelectorAll('.canvas-sidebar-resizer').forEach((el) => canvasWireSidebarResizer(el));
+}
 
-  // Lesson header (Phase 2b §4): fire the same best-effort quiz prefetch the
-  // old study views used, then refresh just the header so the button label
-  // picks up "Preparing quiz…" if generation just kicked off.
-  if (activeConcept) {
-    maybePrefetchQuiz(activeConcept.id).then(() => {
-      if (canvasState === state) canvasRenderLessonControls(state);
+// Revision-canvas entry point (round: revision canvas, part 1) — mirrors
+// renderCanvasView above structurally (build state → canvasBuildItems →
+// canvasRenderVectors/Toolbar/Events/FileList → transform → wire the Files
+// sidebar controls), but scoped to a REVISION instead of a concept: no
+// lesson list / no notesByConceptId / no note — item #0 is the exam's own
+// compiled revision PDF (ref.type 'revision-pdf'). Resolved entirely off
+// EXISTING endpoints (GET /exams/:id, GET /courses/:id, GET /exams/:id/revision,
+// GET /revisions/:id/canvas) — no new backend surface needed for this part.
+async function renderRevisionCanvasView(examId) {
+  examId = Number(examId);
+  const view = document.getElementById('view');
+  view.classList.add('view-fullbleed');
+  view.innerHTML = '<div class="canvas-loading">Loading canvas&hellip;</div>';
+
+  let exam, course, revRes;
+  try {
+    exam = await api.get(`/exams/${examId}`);
+    course = await api.get(`/courses/${exam.course_id}`);
+    revRes = await api.get(`/exams/${examId}/revision`);
+  } catch (e) {
+    view.innerHTML = `<div class="p-8 text-sm" style="color:var(--danger)">Could not load revision: ${esc(e.message)}</div>`;
+    return;
+  }
+
+  if (revRes.status !== 'compiled' || !revRes.revision_id) {
+    // Direct/refreshed navigation before the revision is compiled (a stale
+    // link, or a reload while 'generating') — the prepare/poll flow lives on
+    // the Analysis page (openRevisionFlow + revisionStartPoll); bounce there
+    // rather than duplicate that flow inside the canvas route.
+    view.classList.remove('view-fullbleed');
+    document.body.classList.remove('fullbleed-view');
+    ui.toast(revRes.status === 'generating' ? 'Revision is still preparing…' : 'Prepare the revision PDF first.', 'error');
+    location.hash = `#/analysis/course/${exam.course_id}`;
+    return;
+  }
+
+  const revisionId = revRes.revision_id;
+  let canvasData;
+  try {
+    canvasData = await api.get(`/revisions/${revisionId}/canvas`);
+  } catch (e) {
+    canvasData = { layout: null, files: [] };
+  }
+  const files = canvasData.files || [];
+  const courseLabel = (course && (course.name || course.code)) || 'Course';
+  const examLabel = (exam && exam.name) || 'Exam';
+  const title = `Revision — ${courseLabel} — ${examLabel}`;
+
+  view.innerHTML = canvasRevisionShellHtml(exam.course_id, title);
+
+  const state = {
+    scope: { kind: 'revision', id: revisionId },
+    courseId: Number(exam.course_id),
+    examId,
+    revision: { id: revisionId, status: revRes.status, error_message: revRes.error_message || null, token: revisionCacheToken(revRes) },
+    revisionTitle: title,
+    // Concept-scope fields left null/empty (defensive) — every concept-only
+    // helper (lesson list/switch, Start Quiz/Mark-done, note rename) is never
+    // invoked for this scope, but several read-paths null-check these anyway.
+    conceptId: undefined,
+    concept: null,
+    concepts: [],
+    notesByConceptId: new Map(),
+    origin: 'course',
+    scheduleItems: [],
+    note: null,
+    scrollEl: view.querySelector('#canvas-scroll'),
+    worldEl: view.querySelector('#canvas-world'),
+    files,
+    filesById: new Map(files.map((f) => [f.id, f])),
+    itemsById: new Map(),
+    selection: { items: new Set(), drawings: new Set() },
+    tx: 0, ty: 0, scale: 1,
+    drawings: (canvasData.layout && canvasData.layout.drawings) || [],
+    vectorsEl: view.querySelector('#canvas-vectors'),
+    vectorsG: view.querySelector('#canvas-vectors-g'),
+    vectorsDefs: view.querySelector('#canvas-vectors-defs'),
+    vectorNodes: new Map(),
+    tool: 'select',
+    color: CANVAS_COLORS[0],
+    strokeWidth: CANVAS_STROKE_WIDTHS[1],
+    pendingConnectorFrom: null,
+    historyPast: [],
+    historyFuture: [],
+    dirty: false,
+    saveTimer: null,
+    spaceDown: false,
+    fileSearch: '',
+    fileSort: 'newest',
+    _panRaf: null,
+    _activeItemDragEl: null,
+    _cleanup: null,
+  };
+  canvasState = state;
+  Object.defineProperty(state, 'selectedId', {
+    get() { return (state.selection.items.size === 1 && !state.selection.drawings.size) ? Array.from(state.selection.items)[0] : null; },
+    configurable: true,
+  });
+
+  canvasBuildItems(state, canvasData.layout);
+  canvasRenderVectors(state);
+  canvasRenderToolbar(state);
+  canvasWireEvents(state);
+  canvasRenderFileList(state);
+
+  state.itemsById.forEach((entry, itemId) => {
+    if (entry.refKind === 'canvas-file' && entry.refObj && entry.refObj.status === 'converting') {
+      canvasPollFile(state, entry.refObj.id, itemId);
+    }
+  });
+
+  if (canvasData.layout && canvasData.layout.view) {
+    state.tx = canvasData.layout.view.tx || 0;
+    state.ty = canvasData.layout.view.ty || 0;
+    state.scale = canvasClampScale(canvasData.layout.view.scale || 1);
+    canvasApplyTransform(state);
+  } else {
+    canvasFitToView(state, false);
+  }
+
+  const searchInput = view.querySelector('#canvas-file-search');
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      state.fileSearch = searchInput.value;
+      canvasRenderFileList(state);
     });
   }
+  const sortSelect = view.querySelector('#canvas-file-sort');
+  if (sortSelect) {
+    sortSelect.value = state.fileSort;
+    sortSelect.addEventListener('change', () => {
+      state.fileSort = sortSelect.value;
+      canvasRenderFileList(state);
+    });
+  }
+  const addFileBtn = view.querySelector('#canvas-add-file-btn');
+  const fileInput = view.querySelector('#canvas-file-input');
+  if (addFileBtn && fileInput) {
+    addFileBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+      canvasHandleFileInputChange(state, fileInput.files);
+      fileInput.value = '';
+    });
+  }
+  const emptyAddFileBtn = view.querySelector('#canvas-empty-add-file-btn');
+  if (emptyAddFileBtn && fileInput) emptyAddFileBtn.addEventListener('click', () => fileInput.click());
+
+  view.querySelectorAll('.canvas-sidebar-resizer').forEach((el) => canvasWireSidebarResizer(el));
 }
 
 // Switch the active lesson WITHOUT rebuilding the shell/sidebars (the old
@@ -5284,7 +7019,7 @@ async function canvasSwitchLesson(state, conceptId, courseId) {
   if (state.saveTimer) { clearTimeout(state.saveTimer); state.saveTimer = null; }
   if (state.dirty) {
     state.dirty = false;
-    api.put(`/concepts/${state.conceptId}/canvas`, { data: canvasLayoutDoc(state) })
+    api.put(`${canvasLayoutApiBase(state)}/canvas`, { data: canvasLayoutDoc(state) })
       .catch((e) => console.error('Canvas: failed to flush layout on lesson switch', e));
   }
 
@@ -5311,12 +7046,13 @@ async function canvasSwitchLesson(state, conceptId, courseId) {
   if (canvasState !== state) return; // left / switched again mid-fetch
 
   state.conceptId = conceptId;
+  if (state.scope) state.scope.id = conceptId; // keep scope.id in sync — this function is concept-scope only
   state.concept = state.concepts.find((c) => c.id === conceptId) || null;
   state.note = state.notesByConceptId.get(conceptId) || null;
   state.files = data.files || [];
   state.filesById = new Map(state.files.map((f) => [f.id, f]));
   state.drawings = (data.layout && data.layout.drawings) || [];
-  state.selectedId = null;
+  state.selection = { items: new Set(), drawings: new Set() };
   state.pendingConnectorFrom = null;
   state.historyPast = [];
   state.historyFuture = [];
@@ -5354,12 +7090,6 @@ async function canvasSwitchLesson(state, conceptId, courseId) {
     }
   });
 
-  if (state.concept) {
-    maybePrefetchQuiz(state.concept.id).then(() => {
-      if (canvasState === state) canvasRenderLessonControls(state);
-    });
-  }
-
   const q = state.origin === 'schedule' ? '?from=schedule' : '';
   try { history.replaceState(null, '', `#/course/${state.courseId}/canvas/${conceptId}${q}`); } catch (e) { /* ignore */ }
 }
@@ -5377,7 +7107,7 @@ function stopCanvas() {
   if (state.saveTimer) { clearTimeout(state.saveTimer); state.saveTimer = null; }
   if (state.dirty) {
     state.dirty = false;
-    api.put(`/concepts/${state.conceptId}/canvas`, { data: canvasLayoutDoc(state) }).catch((e) => {
+    api.put(`${canvasLayoutApiBase(state)}/canvas`, { data: canvasLayoutDoc(state) }).catch((e) => {
       console.error('Canvas: failed to flush layout on close', e);
     });
   }
@@ -5458,15 +7188,15 @@ function canvasToolTitle(tool) {
 
 function canvasToolbarHtml(state) {
   const toolBtns = CANVAS_TOOLS.map((tool) => `
-    <button data-action="canvas-tool" data-tool="${tool}" title="${esc(canvasToolTitle(tool))}"
+    <button data-action="canvas-tool" data-tool="${tool}" title="${esc(canvasToolTitle(tool))}" aria-label="${esc(canvasToolTitle(tool))}"
       class="canvas-tool-btn${state.tool === tool ? ' canvas-tool-btn-active' : ''}">
       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${canvasToolIcon(tool)}</svg>
     </button>`).join('');
   const swatches = CANVAS_COLORS.map((c) => `
-    <button data-action="canvas-color" data-color="${c}" title="Color"
+    <button data-action="canvas-color" data-color="${c}" title="Color" aria-label="Color"
       class="canvas-swatch${state.color === c ? ' canvas-swatch-active' : ''}" style="background:${c}"></button>`).join('');
   const strokeBtns = CANVAS_STROKE_WIDTHS.map((w) => `
-    <button data-action="canvas-stroke" data-width="${w}" title="Stroke width"
+    <button data-action="canvas-stroke" data-width="${w}" title="Stroke width" aria-label="Stroke width"
       class="canvas-stroke-btn${state.strokeWidth === w ? ' canvas-stroke-btn-active' : ''}">
       <span class="canvas-stroke-dot" style="width:${Math.min(14, w + 4)}px;height:${Math.min(14, w + 4)}px"></span>
     </button>`).join('');
@@ -5479,10 +7209,10 @@ function canvasToolbarHtml(state) {
       <div class="canvas-toolbar-group">${strokeBtns}</div>
       <span class="canvas-toolbar-sep"></span>
       <div class="canvas-toolbar-group">
-        <button data-action="canvas-undo" title="Undo (Ctrl/Cmd+Z)" class="canvas-tool-btn"${state.historyPast.length ? '' : ' disabled'}>
+        <button data-action="canvas-undo" title="Undo (Ctrl/Cmd+Z)" aria-label="Undo (Ctrl/Cmd+Z)" class="canvas-tool-btn"${state.historyPast.length ? '' : ' disabled'}>
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-2"/></svg>
         </button>
-        <button data-action="canvas-redo" title="Redo (Ctrl/Cmd+Shift+Z)" class="canvas-tool-btn"${state.historyFuture.length ? '' : ' disabled'}>
+        <button data-action="canvas-redo" title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo (Ctrl/Cmd+Shift+Z)" class="canvas-tool-btn"${state.historyFuture.length ? '' : ' disabled'}>
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h2"/></svg>
         </button>
       </div>
@@ -5586,6 +7316,133 @@ function canvasConnectorPoints(state, drawing) {
   return canvasConnectorAnchorPoints(a, b);
 }
 
+// Fix 3 (Build 14 Phase B): point-in-rect / segment-vs-segment / segment-vs-rect
+// helpers used only to decide whether a connector's straight chord would visibly
+// cross another board item (see canvasConnectorPathD below).
+function canvasPointInRect(p, rect) {
+  return p.x >= rect.x && p.x <= rect.x + rect.w && p.y >= rect.y && p.y <= rect.y + rect.h;
+}
+
+function canvasSegSegIntersect(p1, p2, p3, p4) {
+  const d1x = p2.x - p1.x, d1y = p2.y - p1.y;
+  const d2x = p4.x - p3.x, d2y = p4.y - p3.y;
+  const denom = d1x * d2y - d1y * d2x;
+  if (denom === 0) return false; // parallel/collinear — ignore the edge-overlap case, not worth the extra branching here
+  const t = ((p3.x - p1.x) * d2y - (p3.y - p1.y) * d2x) / denom;
+  const u = ((p3.x - p1.x) * d1y - (p3.y - p1.y) * d1x) / denom;
+  return t >= 0 && t <= 1 && u >= 0 && u <= 1;
+}
+
+// True if the p0→p1 segment enters `rect` (expanded by `margin` on every
+// side) — either endpoint lands inside it, or the segment crosses one of its
+// four edges.
+function canvasSegIntersectsRect(p0, p1, rect, margin) {
+  const m = margin || 0;
+  const exp = { x: rect.x - m, y: rect.y - m, w: rect.w + m * 2, h: rect.h + m * 2 };
+  if (canvasPointInRect(p0, exp) || canvasPointInRect(p1, exp)) return true;
+  const c = [
+    { x: exp.x, y: exp.y }, { x: exp.x + exp.w, y: exp.y },
+    { x: exp.x + exp.w, y: exp.y + exp.h }, { x: exp.x, y: exp.y + exp.h },
+  ];
+  for (let i = 0; i < 4; i++) {
+    if (canvasSegSegIntersect(p0, p1, c[i], c[(i + 1) % 4])) return true;
+  }
+  return false;
+}
+
+// Visual fixes round (+ Fix 3, reworked): connectors are STRAIGHT by default;
+// they only bow into a smooth quadratic bezier when the straight chord would
+// visibly cross another board item (obstacles = every item EXCEPT the
+// connector's own two endpoints, so the anchors sitting on their own item's
+// boundary never count as a "hit"). The manual arrow tool stays straight
+// unconditionally — see the `arrow` branch in canvasBuildDrawingEl, untouched.
+//
+// Superseded the earlier "bow at the chord midpoint by a fixed chord-length
+// fraction, first hit only" approach — it only cleared ~30px and a large or
+// off-center obstacle (not dead-center on the chord) still got crossed. Now:
+// (1) every obstacle the chord crosses is considered, routing around
+//     whichever one's center sits closest to the chord line (most "in the
+//     way"), not just whichever was hit first;
+// (2) the bow's peak is based over the obstacle's own center (projected onto
+//     the chord), not the chord's midpoint, so an off-center obstacle is
+//     still actually cleared;
+// (3) the control-point offset is grown (sampling the resulting quadratic at
+//     16 points) until no sampled point lands inside the obstacle's expanded
+//     rect — a guarantee the curve clears it, not just a fixed-size guess.
+function canvasConnectorPathD(state, drawing, pts) {
+  if (!pts) return '';
+  const [p0, p1] = pts;
+  const straight = `M ${p0.x} ${p0.y} L ${p1.x} ${p1.y}`;
+  if (!(state && state.itemsById && drawing)) return straight;
+
+  const margin = 12;
+  // Obstacles = non-endpoint items whose expanded rect the straight chord crosses.
+  const obstacles = [];
+  for (const [itemId, entry] of state.itemsById) {
+    if (itemId === drawing.from || itemId === drawing.to) continue;
+    const d = entry && entry.data;
+    if (!d) continue;
+    const rect = { x: d.x, y: d.y, w: d.w, h: d.h };
+    if (canvasSegIntersectsRect(p0, p1, rect, margin)) obstacles.push(rect);
+  }
+  if (!obstacles.length) return straight;
+
+  const dx = p1.x - p0.x, dy = p1.y - p0.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len, uy = dy / len; // unit along the chord
+  let nx = -uy, ny = ux; // unit normal (perpendicular to the chord)
+
+  // Route around whichever obstacle's center is closest to the chord line
+  // (most "in the way").
+  const perpDist = (r) => {
+    const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+    return Math.abs((cx - p0.x) * nx + (cy - p0.y) * ny);
+  };
+  obstacles.sort((a, b) => perpDist(a) - perpDist(b));
+  const obs = obstacles[0];
+  const ocx = obs.x + obs.w / 2, ocy = obs.y + obs.h / 2;
+
+  // Base = the obstacle center's projection onto the chord — where the bow
+  // should peak (not necessarily the chord's own midpoint).
+  let tproj = (ocx - p0.x) * ux + (ocy - p0.y) * uy;
+  tproj = Math.max(0, Math.min(len, tproj));
+  const baseX = p0.x + ux * tproj, baseY = p0.y + uy * tproj;
+  // Choose the normal side that points AWAY from the obstacle center.
+  if (nx * (baseX - ocx) + ny * (baseY - ocy) < 0) { nx = -nx; ny = -ny; }
+
+  // How far (along the chosen normal, from `base`) the expanded obstacle
+  // extends — its farthest corner sets the minimum clearance the bow needs.
+  const exp = { x: obs.x - margin, y: obs.y - margin, w: obs.w + margin * 2, h: obs.h + margin * 2 };
+  const corners = [
+    { x: exp.x, y: exp.y }, { x: exp.x + exp.w, y: exp.y },
+    { x: exp.x + exp.w, y: exp.y + exp.h }, { x: exp.x, y: exp.y + exp.h },
+  ];
+  let maxClear = 0;
+  for (const c of corners) {
+    const dd = (c.x - baseX) * nx + (c.y - baseY) * ny;
+    if (dd > maxClear) maxClear = dd;
+  }
+  let apexOffset = maxClear + 18; // clearance past the obstacle's far edge
+
+  // Grow the control-point offset until the sampled quadratic no longer
+  // enters the obstacle's expanded rect anywhere along its length —
+  // guarantees "around", not just "roughly toward".
+  const build = (off) => {
+    const cx = baseX + nx * off * 2, cy = baseY + ny * off * 2; // quad apex ~= half the control-point offset
+    let clear = true;
+    for (let i = 1; i < 16; i++) {
+      const t = i / 16, mt = 1 - t;
+      const sx = mt * mt * p0.x + 2 * mt * t * cx + t * t * p1.x;
+      const sy = mt * mt * p0.y + 2 * mt * t * cy + t * t * p1.y;
+      if (canvasPointInRect({ x: sx, y: sy }, exp)) { clear = false; break; }
+    }
+    return { cx, cy, clear };
+  };
+  let r = build(apexOffset), tries = 0;
+  while (!r.clear && tries < 5) { apexOffset *= 1.4; r = build(apexOffset); tries++; }
+  return `M ${p0.x} ${p0.y} Q ${r.cx.toFixed(1)} ${r.cy.toFixed(1)} ${p1.x} ${p1.y}`;
+}
+
 // Cheap per-frame update during an item drag/resize: just moves the existing
 // connector <line> DOM nodes' endpoints, no full rebuild — canvasRenderVectors
 // still runs once on drag-end via the item's own markCanvasDirty path... no,
@@ -5600,8 +7457,7 @@ function canvasUpdateConnectors(state) {
     if (!el) return;
     const pts = canvasConnectorPoints(state, d);
     if (!pts) return;
-    el.setAttribute('x1', pts[0].x); el.setAttribute('y1', pts[0].y);
-    el.setAttribute('x2', pts[1].x); el.setAttribute('y2', pts[1].y);
+    el.setAttribute('d', canvasConnectorPathD(state, d, pts));
   });
 }
 
@@ -5686,7 +7542,9 @@ function canvasBuildDrawingEl(state, d, isPreview) {
     if (!pts) return null;
     // Round 9: always neon purple (+ a glow via the .canvas-connector-line class),
     // regardless of the color stored on the drawing — distinct from the arrow tool.
-    el = canvasSvgEl('line', { x1: pts[0].x, y1: pts[0].y, x2: pts[1].x, y2: pts[1].y, stroke: CANVAS_CONNECTOR_COLOR, 'stroke-width': strokeW, 'stroke-linecap': 'round', 'marker-end': `url(#${canvasArrowMarkerId(state, CANVAS_CONNECTOR_COLOR)})` });
+    // Visual fixes round: a smooth quadratic-bezier <path> instead of a straight
+    // <line> (the manual `arrow` branch above is untouched and stays straight).
+    el = canvasSvgEl('path', { d: canvasConnectorPathD(state, d, pts), fill: 'none', stroke: CANVAS_CONNECTOR_COLOR, 'stroke-width': strokeW, 'stroke-linecap': 'round', 'marker-end': `url(#${canvasArrowMarkerId(state, CANVAS_CONNECTOR_COLOR)})` });
     el.setAttribute('class', 'canvas-connector-line');
   } else if (d.type === 'text') {
     const w = Math.max(40, (d.text || '').length * (d.size || CANVAS_TEXT_SIZE) * 0.62 + 16);
@@ -5704,7 +7562,7 @@ function canvasBuildDrawingEl(state, d, isPreview) {
     el = fo;
   } else if (d.type === 'sticky') {
     const g = canvasSvgEl('g', {});
-    g.appendChild(canvasSvgEl('rect', { x: d.x, y: d.y, width: Math.max(1, d.w), height: Math.max(1, d.h), fill: d.color, stroke: 'rgba(0,0,0,.12)', 'stroke-width': 1, rx: 6 }));
+    g.appendChild(canvasSvgEl('rect', { x: d.x, y: d.y, width: Math.max(1, d.w), height: Math.max(1, d.h), fill: d.color, stroke: canvasBorderStrongColor(), 'stroke-width': 1.5, rx: 6 }));
     const fo = canvasSvgEl('foreignObject', { x: d.x + 8, y: d.y + 8, width: Math.max(1, d.w - 16), height: Math.max(1, d.h - 16) });
     const div = document.createElementNS(CANVAS_XHTML_NS, 'div');
     div.className = 'canvas-sticky-text';
@@ -5734,6 +7592,12 @@ function canvasBuildDrawingEl(state, d, isPreview) {
   if (el) {
     if (d.id) el.dataset.drawingId = d.id;
     if (isPreview) el.setAttribute('opacity', '0.65');
+    // Selection Core: a selected-drawing halo, since SVG has no built-in
+    // "selected" pseudo-class — canvasRenderVectors rebuilds every drawing's
+    // element wholesale each repaint, so re-checking membership here is the
+    // single place this needs to live (mirrors .canvas-item.selected for
+    // item cards; see .canvas-drawing-selected in canvas.css).
+    if (!isPreview && d.id && state.selection && state.selection.drawings.has(d.id)) el.classList.add('canvas-drawing-selected');
   }
   return el;
 }
@@ -5757,6 +7621,7 @@ function canvasRenderVectors(state, preview) {
     if (el) g.appendChild(el);
   }
   state.vectorNodes = nodes;
+  canvasUpdateEmptyHint(state); // F3: covers every drawing add/erase/undo/redo + the initial build/lesson-switch paint
 }
 
 /* ---- eraser: model-based hit-testing (mirrors the reader's readerHitTest/
@@ -6159,7 +8024,7 @@ function canvasDrawingHitTest(state, pt) {
   const ds = state.drawings || [];
   for (let i = ds.length - 1; i >= 0; i--) {
     const d = ds[i];
-    if (!(d.type === 'sticky' || d.type === 'rect' || d.type === 'ellipse' || d.type === 'text')) continue;
+    if (!canvasDrawingIsBoxSelectable(d)) continue;
     const b = canvasDrawingBounds(d);
     if (!b) continue;
     if (pt.x >= b.x - 4 && pt.x <= b.x + b.w + 4 && pt.y >= b.y - 4 && pt.y <= b.y + b.h + 4) return d;
@@ -6182,11 +8047,36 @@ function canvasStartDrawingManipulate(state, e, d, startWpt) {
   const mode = (canvasDrawingIsResizable(d)
     && Math.abs(startWpt.x - (b.x + b.w)) <= cornerTol
     && Math.abs(startWpt.y - (b.y + b.h)) <= cornerTol) ? 'resize' : 'move';
+
+  // Selection Core: a MOVE (not resize) drags the whole current selection
+  // together (mirrors canvasWireItemInteraction's symmetric multi-move) — the
+  // caller (canvasWireEvents' onPointerDown) has already ensured `d` is a
+  // member of state.selection.drawings before invoking this. Resize always
+  // stays single-target (resizing "a whole selection" isn't well-defined).
+  const drawingIdSet = new Set(mode === 'move' ? state.selection.drawings : []);
+  drawingIdSet.add(d.id);
+  const moveDrawingIds = Array.from(drawingIdSet);
+  const moveItemIds = mode === 'move' ? Array.from(state.selection.items) : [];
+
   const orig = {
     x: d.x, y: d.y, w: d.w, h: d.h,
     x1: d.x1, y1: d.y1, x2: d.x2, y2: d.y2,
     points: d.points ? d.points.map((p) => ({ x: p.x, y: p.y })) : null,
   };
+  const drawingStarts = new Map();
+  moveDrawingIds.forEach((did) => {
+    const dd = did === d.id ? d : (state.drawings || []).find((x) => x.id === did);
+    if (!dd) return;
+    if (dd.type === 'line' || dd.type === 'arrow') drawingStarts.set(did, { x1: dd.x1, y1: dd.y1, x2: dd.x2, y2: dd.y2 });
+    else if (dd.type === 'pen') drawingStarts.set(did, { points: (dd.points || []).map((p) => ({ x: p.x, y: p.y })) });
+    else drawingStarts.set(did, { x: dd.x, y: dd.y });
+  });
+  const itemStarts = new Map();
+  moveItemIds.forEach((id) => {
+    const en = state.itemsById.get(id);
+    if (en) itemStarts.set(id, { x: en.data.x, y: en.data.y });
+  });
+
   e.preventDefault();
   try { state.scrollEl.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
   let moved = false;
@@ -6202,12 +8092,23 @@ function canvasStartDrawingManipulate(state, e, d, startWpt) {
     if (mode === 'resize') {
       d.w = Math.max(24, orig.w + dx);
       d.h = Math.max(24, orig.h + dy);
-    } else if (d.type === 'line' || d.type === 'arrow') {
-      d.x1 = orig.x1 + dx; d.y1 = orig.y1 + dy; d.x2 = orig.x2 + dx; d.y2 = orig.y2 + dy;
-    } else if (d.type === 'pen') {
-      d.points = orig.points.map((pp) => ({ x: pp.x + dx, y: pp.y + dy }));
     } else {
-      d.x = orig.x + dx; d.y = orig.y + dy;
+      drawingStarts.forEach((st, did) => {
+        const dd = did === d.id ? d : (state.drawings || []).find((x) => x.id === did);
+        if (!dd) return;
+        if (dd.type === 'line' || dd.type === 'arrow') { dd.x1 = st.x1 + dx; dd.y1 = st.y1 + dy; dd.x2 = st.x2 + dx; dd.y2 = st.y2 + dy; }
+        else if (dd.type === 'pen') { dd.points = st.points.map((pp) => ({ x: pp.x + dx, y: pp.y + dy })); }
+        else { dd.x = st.x + dx; dd.y = st.y + dy; }
+      });
+      itemStarts.forEach((st, id) => {
+        const en = state.itemsById.get(id);
+        if (!en) return;
+        en.data.x = st.x + dx;
+        en.data.y = st.y + dy;
+        en.el.style.left = en.data.x + 'px';
+        en.el.style.top = en.data.y + 'px';
+      });
+      if (itemStarts.size) canvasUpdateConnectors(state);
     }
     canvasRenderVectors(state);
   };
@@ -6323,11 +8224,6 @@ function studySelectNote(noteId) {
   if (list) list.innerHTML = studyState.notes.map((n) => studyListItem(n, studyState.activeId)).join('');
   studyRenderDetail();
   studyRenderRight();
-  if (note.concept_id != null) {
-    maybePrefetchQuiz(note.concept_id).then(() => {
-      if (studyState && studyState.activeId === id) studyRenderDetail();
-    });
-  }
 }
 
 function studyOpenReading() {
@@ -6381,11 +8277,6 @@ async function renderStudyView(courseId, noteId) {
 
   studyRenderDetail();
   studyRenderRight();
-  if (active && active.concept_id != null) {
-    maybePrefetchQuiz(active.concept_id).then(() => {
-      if (studyState && studyState.activeId === active.id) studyRenderDetail();
-    });
-  }
 }
 
 /* ---------- schedule study view: cross-course agenda + PDF pane ---------- */
@@ -6485,11 +8376,6 @@ function schedSelect(itemId) {
   schedStudy.activeId = id;
   schedRenderLeft();
   schedRenderRight();
-  if (item.concept_id != null) {
-    maybePrefetchQuiz(item.concept_id).then(() => {
-      if (schedStudy && schedStudy.activeId === id) schedRenderRight();
-    });
-  }
 }
 
 function schedOpenReading() {
@@ -6510,7 +8396,12 @@ async function renderScheduleStudy(itemId) {
   const to = addDaysISO(today, 30);
   let items = [];
   try {
-    items = await api.get(`/schedule/upcoming?from=${today}&to=${to}`);
+    // Filter out synthetic kind:'revision' rows (Build 12 Phase 4) — this
+    // dormant cross-course study view only knows how to render per-concept
+    // lessons (schedLessonRow reads concept_id/note_id, which a revision row
+    // has neither of).
+    items = (await api.get(`/schedule/upcoming?from=${today}&to=${to}`))
+      .filter((it) => it.kind !== 'revision');
   } catch (e) {
     view.innerHTML = `<div class="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">Could not load schedule: ${esc(e.message)}</div>`;
     return;
@@ -6541,11 +8432,6 @@ async function renderScheduleStudy(itemId) {
 
   schedRenderLeft();
   schedRenderRight();
-  if (activeItem.concept_id != null) {
-    maybePrefetchQuiz(activeItem.concept_id).then(() => {
-      if (schedStudy && schedStudy.activeId === activeItem.id) schedRenderRight();
-    });
-  }
 }
 
 async function showNoteError(noteId, title) {
@@ -6575,7 +8461,7 @@ async function refreshMaterials(courseId) {
     api.get(`/courses/${courseId}`),
     api.get(`/courses/${courseId}/materials`),
   ]);
-  fillMaterialLists(materials);
+  fillMaterialLists(materials, courseId);
   const cc = document.getElementById('course-counts');
   if (cc) cc.textContent = `${materials.length} materials · ${c.note_count} notes`;
 }
@@ -6600,8 +8486,29 @@ function wireUploads(courseId) {
         if (e.dataTransfer && e.dataTransfer.files) handleFiles(courseId, kind, e.dataTransfer.files);
       });
       drop.addEventListener('click', () => input && input.click());
+      // A5: the dropzone carries role="button"/tabindex="0" (uploadPanel) so it's
+      // reachable by keyboard — Enter/Space activates it the same as a click,
+      // matching native <button> behavior.
+      drop.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+          e.preventDefault();
+          input && input.click();
+        }
+      });
     }
   });
+}
+
+// D5: mirrors routers/materials.py's ALLOWED_EXT / MAX_BYTES exactly, so an
+// obviously-invalid file is rejected instantly (clear reason, no round trip)
+// instead of waiting on a 400/413 from the server. Kept in sync by hand if
+// the backend's allowed set ever changes.
+const UPLOAD_ALLOWED_EXT = new Set(['.pdf', '.png', '.jpg', '.jpeg', '.webp', '.doc', '.docx', '.ppt', '.pptx']);
+const UPLOAD_MAX_BYTES = 50 * 1024 * 1024; // 50 MB
+
+function uploadFileExt(name) {
+  const dot = (name || '').lastIndexOf('.');
+  return dot >= 0 ? name.slice(dot).toLowerCase() : '';
 }
 
 async function handleFiles(courseId, kind, fileList) {
@@ -6616,6 +8523,23 @@ async function handleFiles(courseId, kind, fileList) {
     row.innerHTML = `<span class="truncate text-neutral-600">${esc(f.name)}</span><span data-s class="shrink-0 text-neutral-400">uploading…</span>`;
     status.appendChild(row);
     const s = row.querySelector('[data-s]');
+    // D5: client-side pre-check — skip the upload call entirely for a reject.
+    const ext = uploadFileExt(f.name);
+    if (!UPLOAD_ALLOWED_EXT.has(ext)) {
+      const msg = `Unsupported file type '${ext || '?'}'`;
+      s.textContent = msg;
+      s.className = 'shrink-0 text-red-600';
+      ui.toast(`${f.name}: unsupported file type`, 'error');
+      fail++;
+      continue;
+    }
+    if (f.size > UPLOAD_MAX_BYTES) {
+      s.textContent = 'File too large (max 50 MB)';
+      s.className = 'shrink-0 text-red-600';
+      ui.toast(`${f.name}: too large (max 50 MB)`, 'error');
+      fail++;
+      continue;
+    }
     try {
       const fd = new FormData();
       fd.append('kind', kind);
@@ -6631,19 +8555,30 @@ async function handleFiles(courseId, kind, fileList) {
     }
   }
   await refreshMaterials(courseId);
+  // F6 fix: after a successful STUDY-material upload, re-render the Concepts
+  // section so the "Analyze materials" button (disabled while a course has zero
+  // study materials) re-enables immediately — otherwise it stayed greyed until
+  // a manual page reload. PYQ uploads don't affect that button, so skip them.
+  if (ok && kind === 'material') loadStudyArea(courseId);
   if (ok) ui.toast(`${ok} file${ok === 1 ? '' : 's'} uploaded`);
   if (!fail) setTimeout(() => { if (status) status.innerHTML = ''; }, 1500);
 }
 
-async function delMaterial(id) {
-  try {
-    await api.del(`/materials/${id}`);
-    ui.toast('Removed');
-    const m = (location.hash || '').match(/^#\/course\/(\d+)/);
-    if (m) await refreshMaterials(m[1]);
-  } catch (e) {
-    ui.toast(e.message, 'error');
-  }
+function delMaterial(id) {
+  // B2: confirm before removing a source document — every other delete
+  // (course/semester/exam) does, and a material's concepts/notes derive from
+  // it, so a misclick here is genuinely destructive.
+  ui.confirmModal({
+    title: 'Remove material?',
+    message: 'This permanently removes the file. Concepts and notes already generated from it are kept, but you can no longer re-analyze or regenerate from it. This can’t be undone.',
+    confirmLabel: 'Remove',
+    onConfirm: async () => {
+      await api.del(`/materials/${id}`);
+      ui.toast('Removed');
+      const m = (location.hash || '').match(/^#\/course\/(\d+)/);
+      if (m) await refreshMaterials(m[1]);
+    },
+  });
 }
 
 /* ---------- actions ---------- */
@@ -6731,6 +8666,17 @@ function delCourse(id, name) {
 
 /* ---------- health pill ---------- */
 
+// D1: refreshHealthPill only ran once at boot, so the sidebar pill could sit
+// on a stale "All systems OK" for the rest of the session even if the backend
+// later went down (or came back). `healthPollTimer` guards a single slow
+// (~90s) setInterval, started once from enterApp — see initHealthPoll below.
+let healthPollTimer = null;
+
+function initHealthPoll() {
+  if (healthPollTimer) return; // never double-start
+  healthPollTimer = setInterval(refreshHealthPill, 90000);
+}
+
 function healthRow(label, sub, s) {
   const ok = s && s.ok;
   const dot = ok ? 'bg-emerald-500' : 'bg-red-500';
@@ -6759,10 +8705,12 @@ async function refreshHealthPill() {
     const h = await api.get('/health');
     window.__health = h;
     const allOk = h.db.ok && h.tectonic.ok && h.ai_key.ok;
-    el.innerHTML = `<span class="h-2.5 w-2.5 rounded-full ${allOk ? 'bg-emerald-500' : 'bg-amber-500'}"></span>`;
+    const dotCls = allOk ? 'bg-emerald-500' : 'bg-amber-500';
+    const label = allOk ? 'All systems OK' : 'Check status';
+    el.innerHTML = `<span class="sidebar-icon-slot"><span class="h-2.5 w-2.5 shrink-0 rounded-full ${dotCls}"></span></span><span>${label}</span>`;
     el.title = allOk ? 'All systems go' : 'Check status';
   } catch (e) {
-    el.innerHTML = '<span class="h-2.5 w-2.5 rounded-full bg-red-500"></span>';
+    el.innerHTML = '<span class="sidebar-icon-slot"><span class="h-2.5 w-2.5 shrink-0 rounded-full bg-red-500"></span></span><span>Backend offline</span>';
     el.title = 'Backend offline';
   }
 }
@@ -6832,17 +8780,19 @@ function renderSidebarUser() {
   if (!el) return;
   const p = window.__profile;
   const first = profileFirstName(p) || 'Profile';
+  // Two nav-item-style rows (Build 13 FF2, Fix 4) so the bottom cluster
+  // left-aligns collapsed and reveals its label on hover exactly like the
+  // nav rows above. Each leading icon (avatar, logout glyph) sits in a
+  // fixed-width .sidebar-icon-slot so it centers on the SAME vertical axis as
+  // the health dot + the 18px nav icons instead of staggering by intrinsic
+  // width (Build 14 FF); the avatar center-overflows the slot symmetrically.
   el.innerHTML = `
-    <div class="flex flex-col items-center gap-1.5">
-      <button data-action="go-settings" title="${esc(first)} — profile & settings"
-        class="rounded-full p-0.5 transition hover:opacity-80">
-        ${avatarHtml(p, 'h-9 w-9')}
-      </button>
-      <button data-action="logout" title="Log out"
-        class="rounded-lg p-2 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700">
-        ${logoutIcon}
-      </button>
-    </div>`;
+    <button data-action="go-settings" title="${esc(first)} — profile & settings" class="sidebar-nav-item">
+      <span class="sidebar-icon-slot">${avatarHtml(p, 'h-7 w-7')}</span><span>${esc(first)}</span>
+    </button>
+    <button data-action="logout" title="Log out" class="sidebar-nav-item">
+      <span class="sidebar-icon-slot">${logoutIcon}</span><span>Log Out</span>
+    </button>`;
 }
 
 function greetingText() {
@@ -6965,6 +8915,8 @@ async function renderSettings() {
 
       <div id="ai-section"></div>
 
+      <div id="security-section"></div>
+
       <div id="sp-section"></div>
 
       <section class="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
@@ -7070,6 +9022,7 @@ async function renderSettings() {
   renderThemeToggle(); // fills the Appearance section's #theme-toggle (moved here from the sidebar)
   await renderAiSection();
   await renderSavedPromptsSection();
+  await renderSecuritySection();
 }
 
 // Renders ONLY the AI-provider section into #ai-section (its own /settings fetch +
@@ -7135,6 +9088,74 @@ async function renderAiSection() {
       await refreshHealthPill();
       await renderAiSection();
     } catch (e) { ui.toast(e.message || 'Failed to clear key', 'error'); }
+  });
+}
+
+// Renders ONLY the account-security section into #security-section (Feature 5)
+// — modeled exactly on renderAiSection()'s own-fetch/build/wire-locally
+// pattern, so it can be called (and re-rendered) on its own without touching
+// the rest of Settings or its scroll position. Fetches nothing on its own
+// (no dedicated GET endpoint) — it's a pure action form.
+async function renderSecuritySection() {
+  const host = document.getElementById('security-section');
+  if (!host) return;
+  const secQOptions = SECURITY_QUESTIONS
+    .map((q) => `<option value="${esc(q)}">${esc(q)}</option>`).join('');
+  host.innerHTML = `
+    <section class="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
+      <h2 class="text-lg font-semibold">Account security</h2>
+      <p class="mt-1 text-sm text-neutral-500">Change your password. You'll stay signed in.</p>
+      <div class="mt-4 grid gap-4 sm:grid-cols-2">
+        ${field('Current password', `<input id="sec-current" type="password" class="${inputCls}" autocomplete="current-password">`)}
+      </div>
+      <div class="mt-4 grid gap-4 sm:grid-cols-2">
+        ${field('New password', `<input id="sec-new" type="password" class="${inputCls}" autocomplete="new-password">`, 'At least 6 characters.')}
+        ${field('Confirm new password', `<input id="sec-confirm" type="password" class="${inputCls}" autocomplete="new-password">`)}
+      </div>
+      <div class="mt-4">
+        <label class="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-neutral-200 px-2.5 py-1.5 text-sm hover:bg-neutral-50">
+          <input type="checkbox" id="sec-toggle-q">Also change your security question
+        </label>
+      </div>
+      <div id="sec-q-fields" class="mt-4 hidden grid gap-4 sm:grid-cols-2">
+        ${field('Security question', `<select id="sec-question" class="${inputCls}"><option value="">Select a question&hellip;</option>${secQOptions}</select>`)}
+        ${field('Answer', `<input id="sec-answer" class="${inputCls}" autocomplete="off">`, 'Not case-sensitive.')}
+      </div>
+      <div class="mt-6"><button id="save-security" class="${btnPrimary}">Save</button></div>
+    </section>`;
+
+  const toggleQ = host.querySelector('#sec-toggle-q');
+  const qFields = host.querySelector('#sec-q-fields');
+  toggleQ.addEventListener('change', () => {
+    qFields.classList.toggle('hidden', !toggleQ.checked);
+  });
+
+  host.querySelector('#save-security').addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    const current = host.querySelector('#sec-current').value;
+    const next = host.querySelector('#sec-new').value;
+    const confirmVal = host.querySelector('#sec-confirm').value;
+    if (next.length < 6) { ui.toast('New password must be at least 6 characters', 'error'); return; }
+    if (next !== confirmVal) { ui.toast('New passwords do not match', 'error'); return; }
+    const payload = { current_password: current, new_password: next };
+    if (toggleQ.checked) {
+      const q = host.querySelector('#sec-question').value;
+      const a = host.querySelector('#sec-answer').value.trim();
+      if (q && a) {
+        payload.security_question = q;
+        payload.security_answer = a;
+      }
+    }
+    btn.disabled = true;
+    try {
+      await api.post('/auth/change-password', payload);
+      ui.toast('Password updated');
+      await renderSecuritySection(); // clears the form + resets the toggle
+    } catch (e) {
+      ui.toast(e.message || 'Failed to update password', 'error');
+    } finally {
+      btn.disabled = false;
+    }
   });
 }
 
@@ -7265,6 +9286,7 @@ function quizRenderPreparing() {
         <span class="h-6 w-6 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-700"></span>
         <p class="text-sm font-medium text-neutral-700">Preparing your quiz&hellip;</p>
         <p class="text-xs text-neutral-400">The AI is writing questions for this concept. This can take a little while.</p>
+        <button data-action="quiz-cancel" class="mt-2 rounded-lg border border-neutral-200 px-3 py-1.5 text-sm font-medium text-neutral-500 hover:border-neutral-300 hover:text-neutral-800">Cancel</button>
       </div>
     </div>`;
 }
@@ -7391,7 +9413,7 @@ function quizHeaderHtml() {
         <div class="h-full rounded-full bg-primary transition-all duration-500 ease-out" style="width:${pct}%"></div>
       </div>
       <span class="shrink-0 text-xs font-medium text-neutral-500">Question ${Math.min(i + 1, n)} of ${n}</span>
-      <span class="shrink-0 chip chip-grape">Score ${score}/${total}</span>
+      <span class="shrink-0 chip chip-grape">Score ${score}</span>
     </div>`;
 }
 
@@ -7550,7 +9572,9 @@ async function quizFinish() {
   } catch (e) {
     ui.toast(e.message || 'Could not save quiz result', 'error');
   }
-  quizRenderSummary(progress);
+  let attempts = [];
+  try { attempts = await api.get(`/concepts/${conceptId}/attempts`); } catch (_) { /* nice-to-have — skip if unavailable */ }
+  quizRenderSummary(progress, attempts);
 }
 
 function quizNext() {
@@ -7575,12 +9599,17 @@ function quizPerfMessage(score, total) {
   return 'Keep practicing — you will get there.';
 }
 
-function quizRenderSummary(progress) {
+function quizRenderSummary(progress, attempts) {
   const { score, total } = quizState;
   const full = total > 0 && score >= total;
   const view = document.getElementById('view');
   const doneNote = full
     ? `<div class="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">Lesson complete! &#10003; Marked done.</div>`
+    : '';
+  // Nice-to-have (Feature 2): a compact "most recent first" trail of past
+  // attempts on this concept — cap 5 so it never crowds the summary card.
+  const attemptsLine = (attempts && attempts.length)
+    ? `<p class="mt-3 text-xs text-neutral-400">Your attempts: ${attempts.slice(0, 5).map((a) => `${a.score}/${a.total}`).join(' &middot; ')}</p>`
     : '';
   view.innerHTML = `
     <div class="mx-auto flex max-w-lg flex-col items-center rounded-2xl border border-neutral-200 bg-white p-10 text-center shadow-sm">
@@ -7588,6 +9617,7 @@ function quizRenderSummary(progress) {
       <h2 class="mt-2 text-3xl font-semibold tracking-tight">${score} / ${total}</h2>
       <p class="mt-2 text-sm text-neutral-500">${esc(quizPerfMessage(score, total))}</p>
       ${doneNote}
+      ${attemptsLine}
       <div class="mt-6 flex flex-wrap items-center justify-center gap-3">
         <button data-action="quiz-retry" class="${btnSecondary}">Retry</button>
         <button data-action="quiz-new" class="${btnSecondary}">New questions</button>
@@ -7596,8 +9626,36 @@ function quizRenderSummary(progress) {
     </div>`;
 }
 
+async function quizCancel() {
+  quizStopPoll();
+  const cid = quizState && quizState.conceptId;
+  const back = quizBackHref();
+  if (cid != null) { try { await api.post(`/concepts/${cid}/quiz/cancel`, {}); } catch (_) { /* ignore */ } }
+  ui.toast('Quiz cancelled');
+  location.hash = back;
+}
+
+// G3: on Retry, reshuffle each MCQ's option order (Fisher-Yates) so it isn't
+// a pixel-identical replay of the layout the student just saw the answers
+// for — the stored answer_index is remapped to the option's NEW position so
+// correctness checking (quizAnswerMcq) is unaffected. Short-answer questions
+// have no fixed option order, so they're untouched.
+function quizShuffleMcqOptions(q) {
+  if (!q || q.kind !== 'mcq' || !Array.isArray(q.options) || q.options.length < 2) return;
+  if (typeof q.answer_index !== 'number' || !q.options[q.answer_index]) return;
+  const correctOption = q.options[q.answer_index];
+  const shuffled = q.options.slice();
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  q.options = shuffled;
+  q.answer_index = shuffled.indexOf(correctOption);
+}
+
 function quizRetry() {
   if (!quizState) return;
+  quizState.questions.forEach(quizShuffleMcqOptions);
   quizState.i = 0;
   quizState.score = 0;
   quizState.answered = false;
@@ -7613,6 +9671,18 @@ async function quizNewQuestions() {
 }
 
 function quizExit() {
+  // B6: leaving mid-attempt throws away the in-progress answers AND the
+  // generated question set — confirm first if the student has started.
+  const started = quizState && (quizState.answered || (quizState.i || 0) > 0);
+  if (started) {
+    ui.confirmModal({
+      title: 'Leave the quiz?',
+      message: 'You’ll lose your progress on this attempt and the generated questions. Leave anyway?',
+      confirmLabel: 'Leave',
+      onConfirm: async () => { location.hash = quizBackHref(); },
+    });
+    return;
+  }
   location.hash = quizBackHref();
 }
 
@@ -7623,6 +9693,7 @@ function quizExit() {
    initTaskTray() near the bottom) so route()/renderX() never wipe it. */
 
 let taskTrayOpen = false; // survives refreshes so the panel doesn't collapse under the user
+let taskTrayPrevCount = 0; // D4: last-seen active count, to fire a completion toast only on >0 -> 0
 
 function buildTaskTray() {
   if (document.getElementById('task-tray')) return; // idempotent — never double-mount
@@ -7658,10 +9729,21 @@ async function refreshTaskTray() {
   try {
     data = await api.get('/tasks/active');
   } catch (_) {
+    // D1: opportunistic recheck — if the backend has actually gone down, this
+    // poll (every 2.5s) is the fastest available signal, well ahead of the
+    // dedicated 90s health interval. Fire-and-forget; refreshHealthPill has
+    // its own try/catch and won't throw.
+    refreshHealthPill();
     return; // transient failure — skip this tick silently, don't spam toasts
   }
   const tasks = (data && data.tasks) || [];
   const count = (data && data.count) || 0;
+  // D4: fire a one-shot "finished" toast on the >0 -> 0 transition only (never
+  // on every poll, and never when it was already 0 — e.g. right after boot).
+  if (count === 0 && taskTrayPrevCount > 0) {
+    ui.toast('Background tasks finished');
+  }
+  taskTrayPrevCount = count;
   if (count === 0) {
     host.classList.add('hidden');
     return;
@@ -8094,6 +10176,7 @@ function setTheme(mode) {
   try { localStorage.setItem('axiom_theme', mode); } catch (_) {}
   applyTheme();
   renderThemeToggle();
+  renderSidebarThemeToggle();
 }
 
 const THEME_OPTIONS = [
@@ -8101,6 +10184,34 @@ const THEME_OPTIONS = [
   { mode: 'light', label: 'Light' },
   { mode: 'dark', label: 'Dark' },
 ];
+
+// G7: compact single-button theme control for the sidebar bottom cluster
+// (icon + hover-revealed label, matching #health-pill/#sidebar-user rows).
+// Clicking cycles system -> light -> dark -> system by dispatching the SAME
+// data-action="theme-<mode>" the Settings 3-way control already uses (see
+// dispatch() below) — no new dispatcher branch, so there is exactly one
+// handler per click either way (never a double-fire). Kept alongside the
+// segmented control in Settings (#theme-toggle/renderThemeToggle); both are
+// re-rendered together from setTheme()/initTheme() so they never drift.
+const THEME_CYCLE_ICONS = {
+  system: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></svg>',
+  light: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+  dark: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/></svg>',
+};
+const THEME_CYCLE_ORDER = ['system', 'light', 'dark'];
+function renderSidebarThemeToggle() {
+  const el = document.getElementById('sidebar-theme-toggle');
+  if (!el) return;
+  const current = getTheme();
+  const idx = THEME_CYCLE_ORDER.indexOf(current);
+  const next = THEME_CYCLE_ORDER[(idx < 0 ? 0 : idx + 1) % THEME_CYCLE_ORDER.length];
+  const opt = THEME_OPTIONS.find((o) => o.mode === current);
+  const label = opt ? opt.label : 'System';
+  el.innerHTML = `
+    <button data-action="theme-${next}" title="Theme: ${esc(label)} — click to change" class="sidebar-nav-item">
+      <span class="sidebar-icon-slot">${THEME_CYCLE_ICONS[current] || THEME_CYCLE_ICONS.system}</span><span>Theme: ${esc(label)}</span>
+    </button>`;
+}
 
 // Renders the compact segmented System/Light/Dark control into the sidebar's
 // #theme-toggle slot (index.html, above #health-pill). Re-rendered on every
@@ -8124,6 +10235,7 @@ function renderThemeToggle() {
 function initTheme() {
   applyTheme();
   renderThemeToggle();
+  renderSidebarThemeToggle();
 }
 
 // Live-follow the OS theme while the user's choice is 'system' (does not
@@ -8133,6 +10245,1216 @@ try {
     if (getTheme() === 'system') applyTheme();
   });
 } catch (_) {}
+
+/* ---------- Question Analysis (Build 12, Phase 2 — frontend) ----------
+   Backend (Phase 1, already live): GET /courses/:id/analysis -> { status,
+   data|null, stale, pyq_count, concept_count[, error_message] };
+   POST /courses/:id/analysis/generate -> 202 (409 running, 400 no PYQs).
+   `status` is 'pending' (no row yet — never run) | 'generating' | 'ready' |
+   'failed'. One row per course; on-demand + cached + stale-aware, mirrors
+   the mind-map discovery control (mindmap.js) and the quiz generate/poll
+   flow. This phase is a pure viz over `data` (an AnalysisResult) — NO
+   revision/PDF (that's Phases 3-4; deliberately not referenced here).
+   All markup uses `.qa-*` classes from analysis.css + the app's existing
+   `.card`/`.btn`/`.chip` component classes (theme.css) — no new color
+   system, no chart library. ---------- */
+
+let analysisPollTimer = null;
+let analysisPollCourseId = null; // guards a stray timer from a prior course/route
+
+// Ready-state viz state for the per-exam topic filter (added after the
+// original Build 12 viz): { cid, exams, res, selectedExamId ('all'|examId),
+// examFilters ({examId: Promise|{hasConcepts,names}}), conceptNamesPromise }.
+// Built fresh by analysisRenderBody only when status==='ready'; null in every
+// other state so a stale data-action="analysis-exam" click (e.g. left over
+// after navigating away) is a harmless no-op. Cleared in analysisStopPoll(),
+// which route() already calls on every navigation.
+let analysisViewState = null;
+
+function analysisStopPoll() {
+  if (analysisPollTimer) { clearTimeout(analysisPollTimer); analysisPollTimer = null; }
+  analysisPollCourseId = null;
+  analysisViewState = null;
+}
+
+// A tiny semantic pill reusing the app's existing container-tint tokens
+// directly (no new success/warning/danger color classes needed). A leading
+// status dot + bolder weight (`.qa-status-pill`/`.qa-status-dot`, analysis.css)
+// makes it read as a prominent status chip rather than a quiet label.
+function analysisPillHtml(label, kind) {
+  const styles = {
+    success: { bg: 'var(--success-c)', fg: 'var(--on-mint-c)', dot: 'var(--success)' },
+    warning: { bg: 'var(--warning-c)', fg: 'var(--on-lemon-c)', dot: 'var(--warning)' },
+    danger: { bg: 'var(--danger-c)', fg: 'var(--on-danger-c)', dot: 'var(--danger)' },
+    info: { bg: 'var(--sky-c)', fg: 'var(--on-sky-c)', dot: 'var(--info)' },
+    neutral: { bg: 'var(--surface-2)', fg: 'var(--text-muted)', dot: 'var(--text-subtle)' },
+  };
+  const s = styles[kind] || styles.neutral;
+  return `<span class="chip qa-status-pill" style="background:${s.bg};color:${s.fg}"><span class="qa-status-dot" style="background:${s.dot}"></span>${esc(label)}</span>`;
+}
+
+function analysisPillForStatus(status, stale, pyqCount) {
+  if (!pyqCount) return '';
+  if (status === 'generating') {
+    return `<span class="chip qa-status-pill qa-pill-live" style="background:var(--sky-c);color:var(--on-sky-c)"><span class="qa-spinner"></span>Analyzing…</span>`;
+  }
+  if (status === 'ready') return stale ? analysisPillHtml('Stale', 'warning') : analysisPillHtml('Ready', 'success');
+  if (status === 'failed') return analysisPillHtml('Failed', 'danger');
+  return analysisPillHtml('Not analyzed', 'neutral');
+}
+
+/* ---- selection page: #/analysis ---- */
+// Mirrors the Courses page's `courseCard` visual language (leading
+// accentTileStyle() gradient tile with initials, name, accentChipCls() code
+// chip) so the two pages read as one family — see app.js `courseCard` (~75)
+// + theme.css `.course-tile` (~272). The readiness pill moves up beside the
+// name (a prominent `.qa-status-pill`, filled in async); the PYQ-count line
+// + CTA slot are unchanged.
+
+function analysisCourseCardHtml(c, i) {
+  const code = c.code
+    ? `<div class="mt-1"><span class="chip ${accentChipCls(c.id)}">${esc(c.code)}</span></div>`
+    : '';
+  return `
+    <div id="qa-card-${c.id}" style="${riseDelayStyle(i)}" class="card rise-in p-5">
+      <div class="flex items-start gap-3">
+        <span class="course-tile" style="${accentTileStyle(c.id)}">${esc(courseInitials(c.name))}</span>
+        <div class="min-w-0 flex-1 pt-0.5">
+          <div class="flex min-w-0 items-start justify-between gap-2">
+            <h4 class="min-w-0 truncate text-base font-semibold leading-snug">${esc(c.name)}</h4>
+            <span id="qa-pill-${c.id}" class="shrink-0"></span>
+          </div>
+          ${code}
+        </div>
+      </div>
+      <p id="qa-count-${c.id}" class="mt-4 text-xs text-subtle">Checking past questions…</p>
+      <div id="qa-cta-${c.id}" class="mt-3"></div>
+    </div>`;
+}
+
+function analysisSemesterSectionHtml(sem, courses) {
+  const body = courses.length
+    ? `<div class="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">${courses.map((c, i) => analysisCourseCardHtml(c, i)).join('')}</div>`
+    : `<div class="dashed mt-5 p-6 text-sm">No courses in this semester yet.</div>`;
+  return `
+    <section class="mb-10">
+      <div class="flex items-center gap-2.5">
+        <h3 class="text-lg font-semibold">${esc(sem.name)}</h3>
+        <span class="chip chip-neutral">${courses.length} course${courses.length === 1 ? '' : 's'}</span>
+      </div>
+      ${body}
+    </section>`;
+}
+
+// Fills in each card's PYQ count + readiness pill + CTA once its analysis
+// status resolves (fired in parallel, independent of the others — a slow or
+// failed lookup for one course never blocks the rest).
+function analysisFillCourseCards(courses) {
+  courses.forEach((c) => {
+    api.get(`/courses/${c.id}/analysis`).then((res) => {
+      const countEl = document.getElementById(`qa-count-${c.id}`);
+      const pillEl = document.getElementById(`qa-pill-${c.id}`);
+      const ctaEl = document.getElementById(`qa-cta-${c.id}`);
+      if (countEl) {
+        countEl.textContent = res.pyq_count
+          ? `${res.pyq_count} past question${res.pyq_count === 1 ? '' : 's'} uploaded`
+          : 'No past questions yet';
+      }
+      if (pillEl) pillEl.innerHTML = analysisPillForStatus(res.status, res.stale, res.pyq_count);
+      if (ctaEl) {
+        ctaEl.innerHTML = res.pyq_count
+          ? `<button data-action="open-analysis-course" data-id="${c.id}" class="btn btn-secondary w-full justify-center">See analysis</button>`
+          : `<a href="#/course/${c.id}" class="text-sm font-medium" style="color:var(--primary)">Upload past questions to analyze &rarr;</a>`;
+      }
+    }).catch(() => {
+      const countEl = document.getElementById(`qa-count-${c.id}`);
+      if (countEl) countEl.textContent = 'Could not check';
+      const ctaEl = document.getElementById(`qa-cta-${c.id}`);
+      if (ctaEl) ctaEl.innerHTML = `<a href="#/course/${c.id}" class="text-sm font-medium" style="color:var(--primary)">Open course &rarr;</a>`;
+    });
+  });
+}
+
+async function renderAnalysisSelect() {
+  const view = document.getElementById('view');
+  view.innerHTML = '<p class="text-sm text-muted">Loading…</p>';
+  const [semesters, courses] = await Promise.all([
+    api.get('/semesters'),
+    api.get('/courses'),
+  ]);
+
+  let html = `
+    <div class="mb-8">
+      <h2 class="text-2xl font-semibold tracking-tight">Question analysis</h2>
+      <p class="mt-1 text-sm text-muted">Question types, topic importance, and exam patterns mined from each course's past questions.</p>
+    </div>`;
+
+  if (!semesters.length) {
+    view.innerHTML = html + `
+      <div class="dashed flex flex-col items-center gap-3 p-12 text-center">
+        ${emptyCourseIcon}
+        <p class="text-sm font-medium">No semesters yet</p>
+        <p class="mx-auto max-w-sm text-sm text-muted">Create a semester and course, then upload past questions to analyze them here.</p>
+        <a href="#/courses" class="btn btn-primary mt-2 inline-flex">Go to Courses</a>
+      </div>`;
+    return;
+  }
+
+  const byId = {};
+  semesters.forEach((s) => { byId[s.id] = []; });
+  courses.forEach((c) => { if (byId[c.semester_id]) byId[c.semester_id].push(c); });
+  const anyCourses = semesters.some((s) => (byId[s.id] || []).length);
+
+  if (!anyCourses) {
+    view.innerHTML = html + `
+      <div class="dashed flex flex-col items-center gap-3 p-12 text-center">
+        ${emptyCourseIcon}
+        <p class="text-sm font-medium">No courses yet</p>
+        <p class="mx-auto max-w-sm text-sm text-muted">Add a course, then upload past questions to analyze them here.</p>
+        <a href="#/courses" class="btn btn-primary mt-2 inline-flex">Go to Courses</a>
+      </div>`;
+    return;
+  }
+
+  html += semesters.map((s) => analysisSemesterSectionHtml(s, byId[s.id] || [])).join('');
+  view.innerHTML = html;
+  analysisFillCourseCards(courses.filter((c) => byId[c.semester_id]));
+}
+
+/* ---- course view: #/analysis/course/:cid ---- */
+
+// A single small stat tile (value + label) — used for the header's
+// "N questions across M papers" readout instead of a plain sentence.
+function analysisStatChipHtml(value, label) {
+  return `<div class="qa-stat-chip"><span class="qa-stat-value">${esc(String(value))}</span><span class="qa-stat-label">${esc(label)}</span></div>`;
+}
+
+// Refined hero: a course-accented card (accentKey(cid) — this course's own
+// stable identity color, same id-keyed convention as accentTileStyle on the
+// selection page) wraps the title, stat chips, stale badge, and the CTA.
+function analysisHeaderHtml(cid, course, res) {
+  const stale = res.status === 'ready' && res.stale;
+  const canGenerate = res.pyq_count > 0 && res.status !== 'generating';
+  const stats = (res.status === 'ready' && res.data)
+    ? analysisStatChipHtml(res.data.total_questions, res.data.total_questions === 1 ? 'question' : 'questions')
+      + analysisStatChipHtml(res.data.papers_detected, res.data.papers_detected === 1 ? 'paper' : 'papers')
+    : analysisStatChipHtml(res.pyq_count, res.pyq_count === 1 ? 'question uploaded' : 'questions uploaded');
+  const k = accentKey(cid);
+  const heroStyle = `background:linear-gradient(135deg, color-mix(in srgb, var(--${k}) 10%, var(--surface)), var(--surface));border-left:4px solid var(--${k})`;
+  return `
+    <div class="mb-6">
+      <button data-action="analysis-back" class="btn btn-ghost -ml-2 mb-4">&larr; Back</button>
+      <div class="card qa-hero p-6" style="${heroStyle}">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <h2 class="text-2xl font-semibold tracking-tight">${esc(course.name)}</h2>
+              ${stale ? analysisPillHtml('Stale — re-analyze for the latest PYQs', 'warning') : ''}
+            </div>
+            <div class="qa-stats mt-3">${stats}</div>
+          </div>
+          ${canGenerate ? `<button data-action="analysis-generate" data-course-id="${cid}" class="btn btn-primary shrink-0">${res.status === 'ready' ? '↻ Re-analyze' : '✨ Analyze'}</button>` : ''}
+        </div>
+      </div>
+    </div>`;
+}
+
+function analysisEmptyPyqHtml(cid) {
+  return `
+    <div class="card qa-state-card p-12 text-center">
+      <span class="qa-state-icon">📄</span>
+      <p class="mt-4 text-base font-medium">No past questions yet</p>
+      <p class="mx-auto mt-1 max-w-sm text-sm text-muted">Upload past questions (PYQs) to this course to see its question-type mix, topic importance, and exam patterns.</p>
+      <a href="#/course/${cid}" class="btn btn-primary mt-5 inline-flex">Upload past questions</a>
+    </div>`;
+}
+
+function analysisPendingHtml(cid) {
+  return `
+    <div class="card qa-state-card p-12 text-center">
+      <span class="qa-state-icon">✨</span>
+      <p class="mt-4 text-base font-medium">Ready to analyze</p>
+      <p class="mx-auto mt-1 max-w-sm text-sm text-muted">Run one AI pass over this course's past questions to see question-type distribution, topic importance, and exam patterns.</p>
+      <button data-action="analysis-generate" data-course-id="${cid}" class="btn btn-primary mt-5">✨ Analyze past questions</button>
+    </div>`;
+}
+
+function analysisFailedHtml(cid, msg) {
+  return `
+    <div class="card qa-state-card p-10 text-center">
+      <span class="qa-state-icon" style="background:var(--danger-c);color:var(--danger)">!</span>
+      <p class="mt-4 text-base font-medium" style="color:var(--danger)">Analysis failed</p>
+      <p class="mx-auto mt-1 max-w-sm text-sm text-muted">${esc(msg || 'Something went wrong — please try again.')}</p>
+      <button data-action="analysis-generate" data-course-id="${cid}" class="btn btn-secondary mt-5">Retry</button>
+    </div>`;
+}
+
+function analysisGeneratingHtml() {
+  return `
+    <div class="card qa-generating flex flex-col items-center gap-3 p-14 text-center">
+      <span class="qa-spinner qa-spinner-lg"></span>
+      <p class="text-base font-medium">Analyzing your past questions…</p>
+      <p class="max-w-sm text-sm text-muted">One AI pass over the uploaded PYQs — usually well under a minute.</p>
+    </div>`;
+}
+
+// ---- the viz itself (renders from a ready AnalysisResult `data`) ----
+
+function analysisDonutHtml(types) {
+  const total = types.reduce((s, t) => s + (Number(t.count) || 0), 0) || 1;
+  const r = 52, cx = 64, cy = 64, sw = 18;
+  const circ = 2 * Math.PI * r;
+  let acc = 0;
+  const segs = types.map((t, i) => {
+    const frac = (Number(t.count) || 0) / total;
+    const len = Math.max(frac * circ - 1.5, 0); // small gap between segments
+    const dash = `${len.toFixed(2)} ${(circ - len).toFixed(2)}`;
+    const dashoffset = (-acc).toFixed(2);
+    acc += frac * circ;
+    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--${accentKeyByIndex(i)})" stroke-width="${sw}" stroke-linecap="round" stroke-dasharray="${dash}" stroke-dashoffset="${dashoffset}"></circle>`;
+  }).join('');
+  return `
+    <svg viewBox="0 0 128 128" class="qa-donut" role="img" aria-label="Question type distribution">
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--surface-2)" stroke-width="${sw}"></circle>
+      <g transform="rotate(-90 ${cx} ${cy})">${segs}</g>
+      <text x="${cx}" y="${cy - 3}" text-anchor="middle" class="qa-donut-total">${total}</text>
+      <text x="${cx}" y="${cy + 15}" text-anchor="middle" class="qa-donut-total-label">question${total === 1 ? '' : 's'}</text>
+    </svg>`;
+}
+
+function analysisTypesLegendHtml(types) {
+  const total = types.reduce((s, t) => s + (Number(t.count) || 0), 0) || 1;
+  return types.map((t, i) => {
+    const pct = Math.round(((Number(t.count) || 0) / total) * 100);
+    const accent = accentKeyByIndex(i);
+    return `
+      <div class="qa-legend-item" style="background:var(--${accent}-c)">
+        <div class="qa-legend-row">
+          <span class="qa-legend-dot" style="background:var(--${accent})"></span>
+          <span class="qa-legend-label" style="color:var(--on-${accent}-c)">${esc(t.type)}</span>
+          <span class="qa-legend-count" style="color:var(--on-${accent}-c)">${t.count} &middot; ${pct}%</span>
+        </div>
+        ${t.note ? `<p class="qa-legend-note" style="color:var(--on-${accent}-c);opacity:.8">${esc(t.note)}</p>` : ''}
+      </div>`;
+  }).join('');
+}
+
+function analysisTypesSectionHtml(types) {
+  if (!types || !types.length) return '';
+  return `
+    <section class="card qa-section p-6">
+      <h3 class="text-base font-semibold">Question-type distribution</h3>
+      <p class="mt-1 text-sm text-muted">How past questions break down by format.</p>
+      <div class="qa-types-layout mt-5">
+        <div class="qa-donut-wrap">${analysisDonutHtml(types)}</div>
+        <div class="qa-legend">${analysisTypesLegendHtml(types)}</div>
+      </div>
+    </section>`;
+}
+
+function analysisTopicRowHtml(t, i) {
+  const pct = Math.max(0, Math.min(100, Number(t.importance) || 0));
+  const top = i < 3;
+  const accent = accentKeyByIndex(i);
+  const freq = Number(t.frequency) || 0;
+  const rankStyle = top
+    ? `background:var(--${accent}-c);color:var(--on-${accent}-c);box-shadow:0 0 0 3px color-mix(in srgb, var(--${accent}) 22%, transparent)`
+    : '';
+  return `
+    <div class="qa-topic-row ${top ? 'qa-topic-row-top' : ''}">
+      <span class="qa-topic-rank" style="${rankStyle}">${i + 1}</span>
+      <div class="qa-topic-main">
+        <div class="qa-topic-head">
+          <span class="qa-topic-name">${esc(t.name)}</span>
+          ${t.concept_name && t.concept_name !== t.name ? `<span class="qa-topic-concept">${esc(t.concept_name)}</span>` : ''}
+          <span class="qa-topic-freq" title="Recurs ${freq} time${freq === 1 ? '' : 's'} across the papers">&times;${freq}</span>
+        </div>
+        <div class="qa-bar-track">
+          <div class="qa-bar-fill" data-w="${pct}" style="background:linear-gradient(90deg, var(--${accent}-c), var(--${accent}))"></div>
+        </div>
+        ${t.rationale ? `<p class="qa-topic-rationale">${esc(t.rationale)}</p>` : ''}
+      </div>
+      <span class="qa-topic-score">${pct}</span>
+    </div>`;
+}
+
+function analysisTopicsSectionHtml(topics) {
+  if (!topics || !topics.length) return '';
+  const sorted = topics.slice().sort((a, b) => (Number(b.importance) || 0) - (Number(a.importance) || 0));
+  return `
+    <section class="card qa-section p-6">
+      <h3 class="text-base font-semibold">Topic importance ranking</h3>
+      <p class="mt-1 text-sm text-muted">Ranked by how heavily each topic is tested across the past papers.</p>
+      <div class="qa-topics mt-4">${sorted.map((t, i) => analysisTopicRowHtml(t, i)).join('')}</div>
+    </section>`;
+}
+
+const analysisSparkIcon =
+  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h7l-1 8 11-14h-7l1-8z"/></svg>';
+
+function analysisPatternsSectionHtml(patterns) {
+  if (!patterns || !patterns.length) return '';
+  return `
+    <section class="card qa-section p-6">
+      <h3 class="text-base font-semibold">Patterns &amp; insights</h3>
+      <div class="qa-patterns mt-4">
+        ${patterns.map((p, i) => {
+          const accent = accentKeyByIndex(i);
+          return `<div class="qa-pattern-card"><span class="qa-pattern-icon" style="background:var(--${accent}-c);color:var(--${accent})">${analysisSparkIcon}</span><span class="qa-pattern-text">${esc(p)}</span></div>`;
+        }).join('')}
+      </div>
+    </section>`;
+}
+
+function analysisSamplesSectionHtml(topics) {
+  const withSamples = (topics || [])
+    .filter((t) => t.sample_questions && t.sample_questions.length)
+    .slice()
+    .sort((a, b) => (Number(b.importance) || 0) - (Number(a.importance) || 0));
+  if (!withSamples.length) return '';
+  return `
+    <section class="card qa-section p-6">
+      <h3 class="text-base font-semibold">Representative questions</h3>
+      <p class="mt-1 text-sm text-muted">Real past questions for each top topic.</p>
+      <div class="qa-samples mt-4">
+        ${withSamples.map((t, i) => {
+          const accent = accentKeyByIndex(i);
+          return `
+          <details class="qa-details"${i === 0 ? ' open' : ''}>
+            <summary>
+              <span class="qa-details-lead">
+                <span class="dot dot-${accent}"></span>
+                <span class="qa-details-name">${esc(t.name)}</span>
+              </span>
+              <span class="qa-details-count">${t.sample_questions.length} question${t.sample_questions.length === 1 ? '' : 's'}</span>
+            </summary>
+            <div class="qa-details-body">
+              ${t.sample_questions.map((q, qi) => `<div class="qa-sample-q"><span class="qa-sample-q-idx">Q${qi + 1}</span><span>${esc(q)}</span></div>`).join('')}
+            </div>
+          </details>`;
+        }).join('')}
+      </div>
+    </section>`;
+}
+
+function analysisSummarySectionHtml() {
+  return `
+    <section class="card qa-section qa-summary-card p-6">
+      <div class="flex items-center gap-2.5">
+        <span class="qa-icon-badge">${analysisSparkIcon}</span>
+        <h3 class="text-base font-semibold">Summary &amp; exam strategy</h3>
+      </div>
+      <div id="qa-summary" class="ai-rich mt-3 text-sm leading-relaxed"></div>
+    </section>`;
+}
+
+// ---- per-exam topic filter ("All papers" + one button per exam) ----
+// The analysis is ONE blended AnalysisResult over every past paper the course
+// has; this is a pure client-side re-slice of the already-cached `data` — no
+// new AI call, no re-fetch of the analysis. "All papers" shows the full
+// overview (donut + patterns + every topic); picking an exam hides the donut
+// + patterns (they describe the whole course's papers and can't be split per
+// exam) and narrows the topic ranking + representative questions down to that
+// exam's ticked concepts, resolved via GET /exams/:id -> concept_ids ->
+// GET /courses/:cid/concepts id->name (same mapping examConceptsModal uses),
+// matched against topic.concept_name case-insensitively/trimmed — mirroring
+// the server's own revision filter so the two stay conceptually consistent.
+
+function analysisExamBarHtml(exams, selectedId) {
+  const isAll = !selectedId || selectedId === 'all';
+  const allCls = isAll ? 'chip chip-grape qa-exam-btn qa-exam-btn-active' : 'chip chip-neutral qa-exam-btn';
+  const items = [`<button type="button" data-action="analysis-exam" data-exam-id="all" class="${allCls}">All papers</button>`]
+    .concat((exams || []).map((e) => {
+      const active = !isAll && String(e.id) === String(selectedId);
+      const cls = active ? `chip ${accentChipCls(e.id)} qa-exam-btn qa-exam-btn-active` : 'chip chip-neutral qa-exam-btn';
+      return `<button type="button" data-action="analysis-exam" data-exam-id="${e.id}" class="${cls}">${esc(e.name)}</button>`;
+    }));
+  return `<div id="qa-exam-bar" class="qa-exam-bar" role="tablist" aria-label="Filter by exam">${items.join('')}</div>`;
+}
+
+// Lazily fetches + caches (once per view load, on `state`) an id->name map
+// for the course's concepts — used to resolve an exam's ticked concept_ids
+// down to the topic.concept_name strings the analysis already carries.
+function analysisEnsureConceptNames(state) {
+  if (!state.conceptNamesPromise) {
+    state.conceptNamesPromise = api.get(`/courses/${state.cid}/concepts`)
+      .then((concepts) => {
+        const byId = new Map();
+        (concepts || []).forEach((c) => byId.set(c.id, c.name));
+        return byId;
+      })
+      .catch(() => new Map());
+  }
+  return state.conceptNamesPromise;
+}
+
+// Resolves + caches one exam's ticked-concept-name set on
+// state.examFilters[examId]. hasConcepts distinguishes "exam has zero ticked
+// concepts" (concept_count===0) from "ticked concepts just don't match any
+// analyzed topic" — the two edge-case fallback captions read differently.
+async function analysisLoadExamFilter(state, examId) {
+  let resolved;
+  try {
+    const [exam, nameById] = await Promise.all([
+      api.get(`/exams/${examId}`),
+      analysisEnsureConceptNames(state),
+    ]);
+    const ids = exam.concept_ids || [];
+    const names = new Set();
+    ids.forEach((id) => {
+      const nm = nameById.get(id);
+      if (nm) names.add(String(nm).trim().toLowerCase());
+    });
+    resolved = { hasConcepts: ids.length > 0, names };
+  } catch (e) {
+    resolved = { hasConcepts: false, names: new Set() };
+  }
+  state.examFilters[examId] = resolved;
+  return resolved;
+}
+
+// Resolves ONE exam's (never "all") filtered topic set + caption + display
+// name -- shared by analysisVizBodyHtml (renders the topic ranking/samples)
+// and analysisSummaryText (derives the exam-strategy blurb) so the two can
+// never disagree about which topics belong to the selected exam.
+// { loading: true } while the exam's ticked-concept set hasn't resolved yet
+// (analysisSelectExam kicks off analysisLoadExamFilter and re-renders once it
+// settles). Mirrors the two documented empty-result fallbacks (no ticked
+// concepts / ticked concepts match no analyzed topic) -> filtered = all topics.
+function analysisResolveExamFilter(state, examId) {
+  const data = state.res.data;
+  const exam = (state.exams || []).find((e) => String(e.id) === String(examId));
+  const examName = (exam && exam.name) || '';
+  const filter = state.examFilters ? state.examFilters[examId] : null;
+  if (!filter || filter instanceof Promise) {
+    return { loading: true, examName, filtered: [], caption: '', hasConcepts: false };
+  }
+  const topics = data.topics || [];
+  let filtered = topics;
+  let caption;
+  if (!filter.hasConcepts) {
+    caption = 'This exam has no ticked concepts — showing all topics.';
+  } else {
+    filtered = topics.filter((t) => filter.names.has(String(t.concept_name || '').trim().toLowerCase()));
+    if (filtered.length) {
+      caption = `Showing ${filtered.length} of ${topics.length} topic${topics.length === 1 ? '' : 's'} for ${esc(examName)}.`;
+    } else {
+      caption = "None of this exam's concepts appear in the analysis yet — showing all topics.";
+      filtered = topics;
+    }
+  }
+  return { loading: false, examName, filtered, caption, hasConcepts: filter.hasConcepts };
+}
+
+// The viz body for the current selection: the full overview for "All
+// papers", or a filtered topics/samples-only view (donut + patterns hidden)
+// for one exam, with a caption + the two documented empty-result fallbacks
+// (no ticked concepts / ticked concepts match no analyzed topic) so it's
+// never left showing nothing.
+function analysisVizBodyHtml(state) {
+  const data = state.res.data;
+  if (!state.selectedExamId || state.selectedExamId === 'all') {
+    const sections = [
+      analysisTypesSectionHtml(data.question_types),
+      analysisTopicsSectionHtml(data.topics),
+      analysisPatternsSectionHtml(data.patterns),
+      analysisSamplesSectionHtml(data.topics),
+      analysisSummarySectionHtml(),
+    ].filter(Boolean);
+    return sections.join('');
+  }
+  const examId = state.selectedExamId;
+  const resolved = analysisResolveExamFilter(state, examId);
+  if (resolved.loading) {
+    return `<p class="qa-exam-caption">Loading ${esc(resolved.examName)}&hellip;</p>`;
+  }
+  const sections = [
+    `<p class="qa-exam-caption">${resolved.caption}</p>`,
+    analysisTopicsSectionHtml(resolved.filtered),
+    analysisSamplesSectionHtml(resolved.filtered),
+    analysisSummarySectionHtml(),
+  ].filter(Boolean);
+  return sections.join('');
+}
+
+// Derives the "Summary & exam strategy" text shown in #qa-summary: the
+// course-wide AI summary for "All papers" (unchanged), or -- with NO extra
+// AI call -- a markdown strategy built client-side from that exam's already-
+// filtered topics (analysisResolveExamFilter, the exact same set
+// analysisVizBodyHtml renders above it). Returned as markdown; the caller
+// feeds it straight to renderRichText, which HTML-escapes first so raw topic
+// names/rationales here are safe. While the exam's filter hasn't resolved
+// yet (loading), returns '' -- the caption above already says "Loading…" and
+// the re-render once it settles calls this again.
+function analysisSummaryText(state) {
+  const data = state.res.data;
+  if (!state.selectedExamId || state.selectedExamId === 'all') {
+    return data.summary || '';
+  }
+  const resolved = analysisResolveExamFilter(state, state.selectedExamId);
+  if (resolved.loading) return '';
+  const topics = resolved.filtered || [];
+  if (!topics.length) return data.summary || '';
+  const examName = resolved.examName || 'this exam';
+  const byImportance = topics.slice().sort((a, b) => (Number(b.importance) || 0) - (Number(a.importance) || 0));
+  const top = byImportance.slice(0, 3);
+  const names = top.map((t) => `**${t.name}**`);
+  let lead;
+  if (names.length >= 3) {
+    lead = `**Focus for ${examName}:** prioritise ${names[0]}, ${names[1]}, and ${names[2]} first — they carry the most weight on this paper.`;
+  } else if (names.length === 2) {
+    lead = `**Focus for ${examName}:** prioritise ${names[0]} and ${names[1]} first — they carry the most weight on this paper.`;
+  } else {
+    lead = `**Focus for ${examName}:** prioritise ${names[0]} first — it carries the most weight on this paper.`;
+  }
+  const bullets = top.map((t) => {
+    const rationale = (t.rationale || '').trim();
+    const imp = (typeof t.importance === 'number' || typeof t.importance === 'string') && t.importance !== ''
+      ? ` (importance ${Math.round(Number(t.importance) || 0)}/100)`
+      : '';
+    return `- **${t.name}**${imp}${rationale ? ' — ' + rationale : ''}`;
+  });
+  const byFrequency = topics.slice().sort((a, b) => (Number(b.frequency) || 0) - (Number(a.frequency) || 0));
+  const mostFrequent = byFrequency[0];
+  const parts = [lead, bullets.join('\n')];
+  if (mostFrequent) {
+    parts.push(`**${mostFrequent.name}** recurs most often across the papers, so expect it again.`);
+  }
+  return parts.filter(Boolean).join('\n\n');
+}
+
+function analysisVizHtml(state) {
+  const bar = (state.exams && state.exams.length) ? analysisExamBarHtml(state.exams, state.selectedExamId) : '';
+  return `<div id="qa-viz" class="qa-sections">${bar}<div id="qa-viz-body">${analysisVizBodyHtml(state)}</div></div>`;
+}
+
+// Re-renders just the exam bar (active highlight) + the filtered body after a
+// data-action="analysis-exam" click — never re-fetches the analysis itself.
+function analysisRenderVizRegion() {
+  const state = analysisViewState;
+  if (!state) return;
+  const barEl = document.getElementById('qa-exam-bar');
+  if (barEl) barEl.outerHTML = analysisExamBarHtml(state.exams, state.selectedExamId);
+  const bodyEl = document.getElementById('qa-viz-body');
+  if (!bodyEl) return;
+  bodyEl.innerHTML = analysisVizBodyHtml(state);
+  renderMath(bodyEl);
+  const summaryEl = bodyEl.querySelector('#qa-summary');
+  if (summaryEl) renderRichText(summaryEl, analysisSummaryText(state));
+  analysisAnimateBars();
+}
+
+// data-action="analysis-exam" handler (data-exam-id="all"|"<id>"). Renders
+// optimistically (bar highlight + a brief loading caption if unresolved) and
+// re-renders again once the exam's concept-name set resolves; both steps are
+// guarded against navigating away, or picking a different exam meanwhile.
+async function analysisSelectExam(examId) {
+  const state = analysisViewState;
+  if (!state) return; // stale click from a course/route we've since left
+  state.selectedExamId = examId;
+  analysisRenderVizRegion();
+  if (examId === 'all') return;
+  if (!(examId in state.examFilters)) {
+    state.examFilters[examId] = analysisLoadExamFilter(state, examId);
+  }
+  await state.examFilters[examId];
+  if (analysisViewState !== state || state.selectedExamId !== examId) return;
+  analysisRenderVizRegion();
+}
+
+/* ---- "Prepare revision" control (Build 12, Phase 4 — ANALYSIS.md §7 last
+   bullet). Phase 2 deliberately omitted this; it lists the course's exams
+   (fetched alongside the analysis) and reuses the exact same open-revision
+   flow (generate -> poll -> open) as the dashboard row. Each exam's
+   ready/prepare pill + button label resolve asynchronously via
+   analysisFillRevisionCards, same pattern as analysisFillCourseCards on the
+   selection page — never blocks the rest of the viz from rendering. ---- */
+
+function analysisRevisionPillForStatus(status, stale) {
+  if (status === 'generating') {
+    return `<span class="chip qa-pill-live" style="background:var(--sky-c);color:var(--on-sky-c)"><span class="qa-spinner"></span>Preparing…</span>`;
+  }
+  if (status === 'compiled') return stale ? analysisPillHtml('Stale', 'warning') : analysisPillHtml('Ready', 'success');
+  if (status === 'failed') return analysisPillHtml('Failed', 'danger');
+  return analysisPillHtml('Not yet prepared', 'neutral');
+}
+
+// Reuses the same lilac-dashed + doc-glyph identity as the dashboard's
+// synthetic revision row (revisionRow, revisionDocIcon — see app.js ~262) so
+// "revision" reads as one consistent concept across the app.
+function analysisRevisionRowHtml(exam, courseName, i) {
+  return `
+    <div class="qa-revision-item" style="${riseDelayStyle(i)}">
+      <span class="qa-revision-icon" style="color:var(--lilac)">${revisionDocIcon}</span>
+      <div class="min-w-0 flex-1">
+        <p class="qa-revision-item-name">${esc(exam.name)}</p>
+        <p class="qa-revision-item-date">Exam date ${esc(fmtDate(exam.exam_date))}</p>
+      </div>
+      <span id="qa-rev-pill-${exam.id}" class="qa-rev-status shrink-0"></span>
+      <button id="qa-rev-btn-${exam.id}" data-action="open-revision" data-exam-id="${exam.id}"
+        data-course-name="${esc(courseName)}" data-exam-name="${esc(exam.name)}"
+        class="btn btn-secondary qa-rev-btn shrink-0 whitespace-nowrap">Prepare revision PDF</button>
+    </div>`;
+}
+
+function analysisRevisionSectionHtml(cid, courseName, exams) {
+  const head = `
+    <div class="flex items-center gap-2.5">
+      <span class="qa-icon-badge" style="background:var(--lilac-c);color:var(--lilac)">${revisionDocIcon}</span>
+      <h3 class="text-base font-semibold">Revision PDF</h3>
+    </div>`;
+  if (!exams || !exams.length) {
+    return `
+      <section class="card qa-section qa-revision-section p-6">
+        ${head}
+        <p class="mt-3 text-sm text-muted">Add an exam to this course to generate a revision. <a href="#/course/${cid}" class="font-medium" style="color:var(--primary)">Go to course &rarr;</a></p>
+      </section>`;
+  }
+  return `
+    <section class="card qa-section qa-revision-section p-6">
+      ${head}
+      <p class="mt-2 text-sm text-muted">Most-to-least-important concepts plus tailored practice, one PDF per exam &mdash; auto-scheduled the day before it.</p>
+      <div class="qa-revisions mt-4">${exams.map((e, i) => analysisRevisionRowHtml(e, courseName, i)).join('')}</div>
+    </section>`;
+}
+
+// Fires in parallel, independent of the rest of the page — mirrors
+// analysisFillCourseCards on the selection page.
+function analysisFillRevisionCards(exams, courseName) {
+  (exams || []).forEach((ex) => {
+    api.get(`/exams/${ex.id}/revision`).then((res) => {
+      const pillEl = document.getElementById(`qa-rev-pill-${ex.id}`);
+      const btnEl = document.getElementById(`qa-rev-btn-${ex.id}`);
+      if (pillEl) pillEl.innerHTML = analysisRevisionPillForStatus(res.status, res.stale);
+      if (btnEl) {
+        btnEl.textContent = res.status === 'compiled'
+          ? `Open revision PDF`
+          : `Prepare revision PDF`;
+      }
+    }).catch(() => { /* leave the static label/no pill — non-fatal */ });
+  });
+}
+
+// Grows each importance bar from 0 -> target on mount (skipped instantly
+// under prefers-reduced-motion via analysis.css's transition:none override —
+// the width still lands correctly, just without the animated grow-in).
+function analysisAnimateBars() {
+  requestAnimationFrame(() => {
+    document.querySelectorAll('#qa-viz .qa-bar-fill[data-w]').forEach((el) => {
+      requestAnimationFrame(() => { el.style.width = el.dataset.w + '%'; });
+    });
+  });
+}
+
+function analysisRenderBody(cid, course, res, exams) {
+  const view = document.getElementById('view');
+  const header = analysisHeaderHtml(cid, course, res);
+  const revisionSection = analysisRevisionSectionHtml(cid, course.name, exams);
+  // Rebuilt fresh on every call (initial load, poll settle, post-generate) —
+  // re-armed below only for the ready state so a leftover exam-bar click from
+  // a state this course no longer has (e.g. a re-analyze wiped the old data)
+  // can't act on stale data.
+  analysisViewState = null;
+
+  if (!res.pyq_count) {
+    // Nothing to analyze yet — skip the revision control too (it would just
+    // 400 with the same "no PYQs" message; the empty state above already
+    // gives the clear upload CTA).
+    view.innerHTML = header + analysisEmptyPyqHtml(cid);
+    return;
+  }
+  if (res.status === 'ready' && res.data) {
+    analysisViewState = { cid, exams: exams || [], res, selectedExamId: 'all', examFilters: {}, conceptNamesPromise: null };
+    view.innerHTML = header + analysisVizHtml(analysisViewState) + revisionSection;
+    const vizEl = document.getElementById('qa-viz');
+    renderMath(vizEl);
+    const summaryEl = document.getElementById('qa-summary');
+    if (summaryEl) renderRichText(summaryEl, analysisSummaryText(analysisViewState));
+    analysisAnimateBars();
+    analysisFillRevisionCards(exams, course.name);
+    return;
+  }
+  if (res.status === 'generating') {
+    view.innerHTML = header + analysisGeneratingHtml() + revisionSection;
+    analysisFillRevisionCards(exams, course.name);
+    analysisStartPoll(cid);
+    return;
+  }
+  if (res.status === 'failed') {
+    view.innerHTML = header + analysisFailedHtml(cid, res.error_message) + revisionSection;
+    analysisFillRevisionCards(exams, course.name);
+    return;
+  }
+  view.innerHTML = header + analysisPendingHtml(cid) + revisionSection; // 'pending' — never run
+  analysisFillRevisionCards(exams, course.name);
+}
+
+async function renderAnalysisView(cid) {
+  analysisStopPoll();
+  const view = document.getElementById('view');
+  view.innerHTML = '<p class="text-sm text-muted">Loading…</p>';
+  let course, res, exams;
+  try {
+    [course, res, exams] = await Promise.all([
+      api.get(`/courses/${cid}`),
+      api.get(`/courses/${cid}/analysis`),
+      api.get(`/courses/${cid}/exams`).catch(() => []),
+    ]);
+  } catch (e) {
+    view.innerHTML = `<div class="card p-6 text-sm" style="color:var(--danger)">Could not load: ${esc(e.message)}</div>`;
+    return;
+  }
+  analysisRenderBody(cid, course, res, exams);
+}
+
+// Polls GET /courses/:cid/analysis every ~2s while status stays 'generating'
+// (mirrors mindmap.js's discovery poll); re-renders the whole body once it
+// settles. Guarded by analysisPollCourseId so a stale timer from a course the
+// user has since navigated away from can never clobber the current view.
+function analysisStartPoll(cid) {
+  analysisPollCourseId = cid;
+  const tick = async () => {
+    if (analysisPollCourseId !== cid) return;
+    let res;
+    try {
+      res = await api.get(`/courses/${cid}/analysis`);
+    } catch (e) {
+      if (analysisPollCourseId === cid) analysisPollTimer = setTimeout(tick, 2500);
+      return;
+    }
+    if (analysisPollCourseId !== cid) return;
+    if (res.status === 'generating') {
+      analysisPollTimer = setTimeout(tick, 2000);
+      return;
+    }
+    analysisStopPoll();
+    const [course, exams] = await Promise.all([
+      api.get(`/courses/${cid}`).catch(() => ({ id: cid, name: '' })),
+      api.get(`/courses/${cid}/exams`).catch(() => []),
+    ]);
+    if (location.hash !== `#/analysis/course/${cid}`) return; // navigated away mid-fetch
+    analysisRenderBody(cid, course, res, exams);
+  };
+  analysisPollTimer = setTimeout(tick, 2000);
+}
+
+function confirmAnalysisGenerate(cid) {
+  ui.confirmModal({
+    title: 'Analyze past questions?',
+    message: "This runs one AI call over this course's uploaded past questions to find question types, topic importance, recurring patterns, and an exam-strategy summary.",
+    confirmLabel: 'Analyze',
+    tone: 'primary', // safe, beneficial AI action — not a destructive delete
+    onConfirm: async () => {
+      try {
+        await api.post(`/courses/${cid}/analysis/generate`, {});
+      } catch (e) {
+        // A run already in flight (409) just means: join its poll instead of
+        // failing the modal — mirrors mindmap.js's mmRunDiscover.
+        if (!/already running/i.test(e.message || '')) throw e;
+      }
+      // The endpoint sets status='generating' SYNCHRONOUSLY before returning
+      // 202 (see routers/analysis.py), so re-fetching right away already
+      // reflects it — no need to fake pyq_count/etc. in a placeholder.
+      const [course, res, exams] = await Promise.all([
+        api.get(`/courses/${cid}`).catch(() => ({ id: cid, name: '' })),
+        api.get(`/courses/${cid}/analysis`).catch(() => ({ status: 'generating', data: null, stale: false, pyq_count: 0 })),
+        api.get(`/courses/${cid}/exams`).catch(() => []),
+      ]);
+      analysisRenderBody(cid, course, res, exams);
+    },
+  });
+}
+
+/* ---------- revision PDF: open / generate / poll (Build 12, Phase 4) ----------
+   Shared by the dashboard revision row/chip AND the analysis view's "Prepare
+   revision PDF" control — both dispatch through the single `open-revision`
+   action, which always re-fetches GET /exams/:eid/revision fresh (never
+   trusts a stale dataset attribute from when the row was rendered) and then:
+     compiled  -> open the PDF in the existing reader (openReader, pdfUrl)
+     generating -> join the poll (a run already in flight elsewhere)
+     else (pending/failed) -> confirm, POST .../generate, then poll
+   No reader.js change: pdfUrl/annGetUrl/annPutUrl are all pre-existing
+   openReader() options (already used by canvas-file cards). Explicit
+   annGetUrl/annPutUrl overrides here — rather than letting openReader default
+   them to /notes/{id}/annotations — are deliberate: revisions are a separate
+   `revisions` table with its own autoincrement id sequence, so a bare
+   `{id: revisionId}` could otherwise collide with an unrelated note that
+   happens to share the same numeric id and load/overwrite ITS annotations.
+   Pointing at a route that simply doesn't exist (revisions have no
+   annotations endpoint in this phase) 404s harmlessly instead. ---------- */
+
+let revisionPollTimer = null;
+let revisionPollExamId = null; // guards a stale timer from a prior exam/route
+
+function revisionStopPoll() {
+  if (revisionPollTimer) { clearTimeout(revisionPollTimer); revisionPollTimer = null; }
+  revisionPollExamId = null;
+}
+
+// E1: the revision row is UPDATEd in place on regenerate (routers/analysis.py
+// generate_revision — same `revisions.id`, new PDF bytes), so a bare
+// `/api/revisions/:id/pdf` URL is identical before and after a regen and can
+// serve a browser-cached stale PDF on reopen. Prefers `res.source_sig` (a
+// content fingerprint already computed server-side for staleness checks) if
+// the /exams/:eid/revision response ever starts returning it; otherwise
+// res.revision_id alone doesn't change across a regen so it can't be used as
+// the token, and there's no updated_at in the response today — falls back to
+// the open-time timestamp, which always busts the cache on every (re)open.
+function revisionCacheToken(res) {
+  if (res && res.source_sig) return String(res.source_sig);
+  if (res && res.revision_id != null && res.updated_at) return `${res.revision_id}-${res.updated_at}`;
+  return String(Date.now());
+}
+
+function revisionReaderNote(revisionId, courseName, cacheToken) {
+  const v = cacheToken ? `?v=${encodeURIComponent(cacheToken)}` : '';
+  return {
+    id: revisionId,
+    title: `Revision — ${courseName}`,
+    pdfUrl: `/api/revisions/${revisionId}/pdf${v}`,
+    // Annotation URLs unchanged — no cache-bust needed/wanted there.
+    annGetUrl: `/revisions/${revisionId}/annotations`,
+    annPutUrl: `/revisions/${revisionId}/annotations`,
+  };
+}
+
+// Polls GET /exams/:eid/revision every ~2.5s while status stays 'generating';
+// opens the reader once compiled, toasts a visible message on failure.
+// Guarded by revisionPollExamId exactly like analysisStartPoll's cid guard.
+function revisionStartPoll(examId, courseName) {
+  const key = String(examId);
+  revisionPollExamId = key;
+  const tick = async () => {
+    if (revisionPollExamId !== key) return;
+    let res;
+    try {
+      res = await api.get(`/exams/${examId}/revision`);
+    } catch (e) {
+      if (revisionPollExamId === key) revisionPollTimer = setTimeout(tick, 2500);
+      return;
+    }
+    if (revisionPollExamId !== key) return;
+    if (res.status === 'generating') {
+      revisionPollTimer = setTimeout(tick, 2500);
+      return;
+    }
+    revisionStopPoll();
+    if (res.status === 'compiled' && res.revision_id) {
+      ui.toast('Revision ready');
+      // Revision canvas part 1: open the revision's own canvas (matching how
+      // a compiled lesson opens to its canvas), not the reader directly.
+      location.hash = `#/exams/${examId}/revision/canvas`;
+    } else if (res.status === 'failed') {
+      ui.toast(res.error_message || 'Revision generation failed', 'error');
+    }
+  };
+  revisionPollTimer = setTimeout(tick, 2500);
+}
+
+async function openRevisionFlow(examId, courseName, examName) {
+  let res;
+  try {
+    res = await api.get(`/exams/${examId}/revision`);
+  } catch (e) {
+    ui.toast(e.message || 'Could not check revision status', 'error');
+    return;
+  }
+  if (res.status === 'compiled' && res.revision_id) {
+    // Revision canvas part 1: open the revision's own canvas (matching how a
+    // compiled lesson opens to its canvas), not the reader directly.
+    location.hash = `#/exams/${examId}/revision/canvas`;
+    return;
+  }
+  if (res.status === 'generating') {
+    ui.toast('Preparing your revision…');
+    revisionStartPoll(examId, courseName);
+    return;
+  }
+  ui.confirmModal({
+    title: 'Prepare revision PDF?',
+    message: `Prepare the revision PDF for ${examName}? This uses one AI call and compiles a PDF.`,
+    confirmLabel: 'Prepare',
+    tone: 'primary', // safe, beneficial AI action — not a destructive delete
+    onConfirm: async () => {
+      try {
+        await api.post(`/exams/${examId}/revision/generate`, {});
+      } catch (e) {
+        // A run already in flight (409) just means: join its poll instead of
+        // failing the modal — mirrors confirmAnalysisGenerate's own 409 case.
+        if (!/already generating/i.test(e.message || '')) throw e;
+      }
+      ui.toast('Preparing your revision…');
+      revisionStartPoll(examId, courseName);
+    },
+  });
+}
+
+/* ---------- global search command palette (Build 13c) ----------
+   Ctrl/Cmd+K (or the sidebar's Search rail icon) opens a body-mounted overlay
+   that searches the WHOLE curriculum — courses + concepts — by name (courses
+   also match on code, concepts also match on summary). There's no dedicated
+   backend search endpoint; GET /mindmap/graph already returns the account's
+   entire semesters/courses/concepts/links in one authed call, so this reuses
+   it (fetched once per page session and cached in searchPaletteGraph — a
+   stale cache just means a brand-new course/concept made in this session
+   might not show up until the next reload, which is an acceptable tradeoff
+   for not adding a backend endpoint). Not built on ui.mountOverlay: it needs
+   its own (wider) panel width and its own ArrowUp/ArrowDown/Enter handling
+   layered on top of Escape/backdrop-click, so it mounts a bespoke overlay at
+   the same z-[75] tier instead (see ui.js's mountOverlay comment for the
+   layering stack). */
+let searchPaletteEl = null;      // the mounted backdrop element, or null when closed
+let searchPaletteGraph = null;   // cached /mindmap/graph response for this page session
+// Fix 2 (Build 14 Phase B): cached GET /api/canvas/text-index response for this
+// page session — {items:[{concept_id, course_id, course_name, concept_name,
+// drawing_id, kind, text}]}, one row per text-box/sticky-note drawing across
+// the account's canvases (pen strokes aren't indexed — nothing to match on).
+// Same staleness tradeoff as searchPaletteGraph: cached once per page load.
+let searchPaletteCanvasIndex = null;
+let searchPaletteResults = [];   // flat list of the CURRENTLY rendered rows, in display order
+let searchPaletteSelected = 0;   // index into searchPaletteResults
+
+// Registered once from enterApp() (guarded by appEntered same as initTaskTray/
+// initPomodoro) — a plain global hotkey, so it works from any view.
+function initSearchHotkey() {
+  document.addEventListener('keydown', (e) => {
+    const mod = e.ctrlKey || e.metaKey;
+    if (!mod || (e.key !== 'k' && e.key !== 'K')) return;
+    e.preventDefault();
+    if (searchPaletteEl) closeSearchPalette();
+    else openSearchPalette();
+  });
+}
+
+async function openSearchPalette() {
+  if (searchPaletteEl) return;
+  const magnifier =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>';
+  const overlay = document.createElement('div');
+  overlay.className = 'search-palette-backdrop';
+  overlay.innerHTML = `
+    <div class="search-palette" role="dialog" aria-modal="true" aria-label="Search">
+      <div class="search-palette-input-row">
+        ${magnifier}
+        <input type="text" class="field-input search-palette-input" placeholder="Search courses and lessons…" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="search-palette-results" data-results></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  searchPaletteEl = overlay;
+  searchPaletteSelected = 0;
+
+  const input = overlay.querySelector('.search-palette-input');
+
+  overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) closeSearchPalette(); });
+  overlay.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); closeSearchPalette(); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); moveSearchSelection(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); moveSearchSelection(-1); }
+    else if (e.key === 'Enter') { e.preventDefault(); activateSearchSelection(); }
+    // A3: focus trap — the search input is the palette's only natively
+    // focusable element (result rows are plain divs, navigated via arrow
+    // keys instead), so Tab/Shift+Tab just keeps focus there rather than
+    // letting it escape to the page behind the overlay.
+    else if (e.key === 'Tab') { e.preventDefault(); input.focus(); }
+  });
+  input.addEventListener('input', () => renderSearchResults(input.value));
+
+  input.focus();
+  renderSearchResults(''); // empty-query hint while the graph loads (or from cache)
+
+  if (!searchPaletteGraph) {
+    try { searchPaletteGraph = await api.get('/mindmap/graph'); }
+    catch (e) { searchPaletteGraph = { courses: [], concepts: [] }; }
+    // The user may have closed the palette while this fetch was in flight.
+    if (searchPaletteEl === overlay) renderSearchResults(input.value);
+  }
+  if (!searchPaletteCanvasIndex) {
+    try { searchPaletteCanvasIndex = (await api.get('/canvas/text-index')).items || []; }
+    catch (e) { searchPaletteCanvasIndex = []; }
+    if (searchPaletteEl === overlay) renderSearchResults(input.value);
+  }
+}
+
+function closeSearchPalette() {
+  if (!searchPaletteEl) return;
+  searchPaletteEl.remove();
+  searchPaletteEl = null;
+  searchPaletteResults = [];
+  searchPaletteSelected = 0;
+}
+
+function moveSearchSelection(delta) {
+  if (!searchPaletteResults.length) return;
+  searchPaletteSelected = (searchPaletteSelected + delta + searchPaletteResults.length) % searchPaletteResults.length;
+  highlightSearchSelection();
+}
+
+function highlightSearchSelection() {
+  if (!searchPaletteEl) return;
+  searchPaletteEl.querySelectorAll('[data-search-row]').forEach((row) => {
+    const selected = Number(row.dataset.searchRow) === searchPaletteSelected;
+    row.classList.toggle('search-palette-row-selected', selected);
+    if (selected) row.scrollIntoView({ block: 'nearest' });
+  });
+}
+
+function activateSearchSelection() {
+  const r = searchPaletteResults[searchPaletteSelected];
+  if (r) selectSearchResult(r);
+}
+
+function selectSearchResult(r) {
+  closeSearchPalette();
+  if (r.type === 'course') { location.hash = `#/course/${r.id}`; return; }
+  if (r.type === 'canvas-text') {
+    // Already on that concept's canvas? Pan in place — no navigation/reload.
+    if (canvasState && canvasState.conceptId === r.conceptId) {
+      canvasPanToDrawing(canvasState, r.drawingId);
+    } else {
+      canvasPendingFocus = { conceptId: r.conceptId, drawingId: r.drawingId };
+      location.hash = `#/course/${r.courseId}/canvas/${r.conceptId}`;
+    }
+    return;
+  }
+  location.hash = `#/course/${r.courseId}/canvas/${r.id}`;
+}
+
+const SEARCH_RESULT_CAP = 8;
+
+// Builds a short, readable snippet around the (lowercased) match `q` inside
+// `text`, similar to a search-engine result preview: trims to nearby context
+// rather than dumping the whole note. Falls back to a plain truncation if the
+// match position can't be found (shouldn't happen — caller only calls this on
+// texts that already matched `q`).
+function searchSnippet(text, q, maxLen) {
+  const t = text || '';
+  if (!q) return t.length > maxLen ? t.slice(0, maxLen).trim() + '…' : t;
+  const idx = t.toLowerCase().indexOf(q);
+  if (idx === -1) return t.length > maxLen ? t.slice(0, maxLen).trim() + '…' : t;
+  const pad = Math.max(0, Math.floor((maxLen - q.length) / 2));
+  const start = Math.max(0, idx - pad);
+  const end = Math.min(t.length, idx + q.length + pad);
+  let snippet = t.slice(start, end).trim();
+  if (start > 0) snippet = '…' + snippet;
+  if (end < t.length) snippet = snippet + '…';
+  return snippet;
+}
+
+function renderSearchResults(query) {
+  const resultsEl = searchPaletteEl && searchPaletteEl.querySelector('[data-results]');
+  if (!resultsEl) return;
+  // D3: searchPaletteGraph is null until the very first /mindmap/graph fetch
+  // resolves (openSearchPalette calls this once immediately, before that
+  // fetch even starts) — without this, that first call falls through to the
+  // "nothing to search" empty state, which reads as if the account has no
+  // courses/concepts at all. Show a neutral loading row instead until the
+  // graph is actually in hand (loaded, or failed — openSearchPalette sets it
+  // to a fallback {courses:[],concepts:[]} either way, so this only gates the
+  // true not-yet-fetched window).
+  if (searchPaletteGraph === null) {
+    resultsEl.innerHTML = `<div class="search-palette-empty">Loading…</div>`;
+    searchPaletteResults = [];
+    searchPaletteSelected = 0;
+    return;
+  }
+  const g = searchPaletteGraph || { courses: [], concepts: [] };
+  const courses = g.courses || [];
+  const concepts = g.concepts || [];
+  const canvasItems = searchPaletteCanvasIndex || [];
+  const q = (query || '').trim().toLowerCase();
+  const courseName = (courseId) => {
+    const c = courses.find((x) => x.id === courseId);
+    return c ? c.name : '';
+  };
+
+  const courseMatches = (q
+    ? courses.filter((c) => (c.name || '').toLowerCase().includes(q) || (c.code || '').toLowerCase().includes(q))
+    : courses
+  ).slice(0, SEARCH_RESULT_CAP);
+  const conceptMatches = (q
+    ? concepts.filter((c) => (c.name || '').toLowerCase().includes(q) || (c.summary || '').toLowerCase().includes(q))
+    : concepts
+  ).slice(0, SEARCH_RESULT_CAP);
+  // Canvas notes (text-box/sticky) only match on an actual, non-empty query —
+  // an empty query listing every note on every board would be noisy and,
+  // unlike courses/concepts, there's no natural "show all" browsing use case
+  // for them here.
+  const canvasMatches = (q
+    ? canvasItems.filter((it) => (it.text || '').toLowerCase().includes(q))
+    : []
+  ).slice(0, SEARCH_RESULT_CAP);
+
+  searchPaletteResults = [
+    ...courseMatches.map((c) => ({ type: 'course', id: c.id, title: c.name, subtitle: c.code || '' })),
+    ...conceptMatches.map((c) => ({ type: 'concept', id: c.id, courseId: c.course_id, title: c.name, subtitle: courseName(c.course_id) })),
+    ...canvasMatches.map((it) => ({
+      type: 'canvas-text',
+      conceptId: it.concept_id,
+      courseId: it.course_id,
+      drawingId: it.drawing_id,
+      kind: it.kind,
+      title: searchSnippet(it.text, q, 90),
+      subtitle: `${it.course_name || ''} · ${it.concept_name || ''}`,
+    })),
+  ];
+  searchPaletteSelected = 0;
+
+  if (!searchPaletteResults.length) {
+    resultsEl.innerHTML = `<div class="search-palette-empty">${
+      q ? `No matches for &ldquo;${esc(query.trim())}&rdquo;.` : 'No courses or lessons yet — nothing to search.'
+    }</div>`;
+    return;
+  }
+
+  let html = '';
+  if (courseMatches.length) {
+    html += '<div class="search-palette-group-label">Courses</div>';
+    courseMatches.forEach((c, i) => { html += searchPaletteRowHtml(i, 'course', c.name, c.code || ''); });
+  }
+  if (conceptMatches.length) {
+    html += '<div class="search-palette-group-label">Concepts</div>';
+    conceptMatches.forEach((c, i) => {
+      html += searchPaletteRowHtml(courseMatches.length + i, 'concept', c.name, courseName(c.course_id));
+    });
+  }
+  if (canvasMatches.length) {
+    html += '<div class="search-palette-group-label">Canvas notes</div>';
+    const base = courseMatches.length + conceptMatches.length;
+    canvasMatches.forEach((it, i) => {
+      // it is the raw /canvas/text-index item ({text, course_name,
+      // concept_name, …}), not the mapped searchPaletteResults entry — build
+      // the same snippet/subtitle here as in the results mapping above.
+      html += searchPaletteRowHtml(base + i, 'canvas-text', searchSnippet(it.text, q, 90), `${it.course_name || ''} · ${it.concept_name || ''}`);
+    });
+  }
+  if (!q) html += `<div class="search-palette-hint">Type to filter, or use &uarr;/&darr; and Enter.</div>`;
+  resultsEl.innerHTML = html;
+  highlightSearchSelection();
+  resultsEl.querySelectorAll('[data-search-row]').forEach((row) => {
+    const idx = Number(row.dataset.searchRow);
+    row.addEventListener('click', () => selectSearchResult(searchPaletteResults[idx]));
+    row.addEventListener('mousemove', () => {
+      if (idx !== searchPaletteSelected) { searchPaletteSelected = idx; highlightSearchSelection(); }
+    });
+  });
+}
+
+// `type` is 'course' | 'concept' | 'canvas-text'; `title`/`subtitle` are
+// already-resolved display strings (a snippet, for canvas-text rows).
+function searchPaletteRowHtml(idx, type, title, subtitle) {
+  const dotCls = type === 'course' ? 'dot-grape' : type === 'canvas-text' ? 'dot-lemon' : 'dot-sky';
+  const badge = type === 'course' ? 'Course' : type === 'canvas-text' ? 'Note' : 'Lesson';
+  return `
+    <div class="search-palette-row" data-search-row="${idx}">
+      <span class="dot ${dotCls}"></span>
+      <div class="search-palette-row-text">
+        <div class="search-palette-row-title">${esc(title || 'Untitled')}</div>
+        ${subtitle ? `<div class="search-palette-row-subtitle">${esc(subtitle)}</div>` : ''}
+      </div>
+      <span class="chip chip-neutral search-palette-row-badge">${badge}</span>
+    </div>`;
+}
 
 /* ---------- routing + wiring ---------- */
 
@@ -8144,6 +11466,8 @@ function updateSidebarActive() {
   const hash = location.hash || '#/';
   let section = 'home';
   if (/^#\/settings\/?$/.test(hash)) section = 'settings';
+  else if (/^#\/mindmap\/?$/.test(hash)) section = 'mindmap';
+  else if (/^#\/analysis/.test(hash)) section = 'analysis';
   else if (/^#\/(courses\/?$|course\/)/.test(hash)) section = 'courses';
   document.querySelectorAll('#sidebar [data-nav]').forEach((el) => {
     el.classList.toggle('active', el.dataset.nav === section);
@@ -8153,24 +11477,46 @@ function updateSidebarActive() {
 async function route() {
   quizStopPoll();
   stopJobPolling();
+  stopMaterialsPolling();
   closeReader();
   stopCanvas();
+  analysisStopPoll();
+  revisionStopPoll();
+  if (window.mindmap) window.mindmap.stop();
   updateSidebarActive();
   const hash = location.hash || '#/';
   const canvas = hash.match(/^#\/course\/(\d+)\/canvas(?:\/(\d+))?/);
+  const revisionCanvas = hash.match(/^#\/exams\/(\d+)\/revision\/canvas/);
   const study = hash.match(/^#\/course\/(\d+)\/study(?:\/(\d+))?/);
   const scheduleStudy = hash.match(/^#\/study(?:\/(\d+))?$/);
   const coursesList = hash.match(/^#\/courses\/?$/);
   const settingsView = hash.match(/^#\/settings\/?$/);
+  const mindmapView = hash.match(/^#\/mindmap\/?$/);
+  const analysisSelect = hash.match(/^#\/analysis\/?$/);
+  const analysisView = hash.match(/^#\/analysis\/course\/(\d+)/);
   const quizView = hash.match(/^#\/quiz\/(\d+)$/);
   const course = hash.match(/^#\/course\/(\d+)/);
+  // Fix 2: on the full-bleed views (mind map, canvas, revision canvas) the
+  // sidebar hover-expand must FLOAT over the content instead of pushing it —
+  // those views recompute their own layout (mmResize / the canvas board) off
+  // the content column's width, so a push-driven expand visibly resized them
+  // while the cursor was just over the rail. `body.fullbleed-view` (index.html
+  // inline <style>) takes #sidebar out of flow (position:fixed) and offsets
+  // the content column by the rail's collapsed width instead. Toggled here —
+  // not inside the try block — so it's set/cleared on every route change
+  // regardless of which branch below renders, mirroring updateSidebarActive().
+  document.body.classList.toggle('fullbleed-view', !!(canvas || revisionCanvas || mindmapView));
   try {
     if (quizView) await renderQuiz(quizView[1]);
     else if (canvas) await renderCanvasView(canvas[1], canvas[2], /[?&]from=schedule/.test(hash) ? 'schedule' : 'course');
+    else if (revisionCanvas) await renderRevisionCanvasView(revisionCanvas[1]);
     else if (study) await renderStudyView(study[1], study[2]);
     else if (scheduleStudy) await renderScheduleStudy(scheduleStudy[1]);
     else if (coursesList) await renderCourses();
     else if (settingsView) await renderSettings();
+    else if (mindmapView) await window.mindmap.render();
+    else if (analysisView) await renderAnalysisView(analysisView[1]);
+    else if (analysisSelect) await renderAnalysisSelect();
     else if (course) await renderCourse(course[1]);
     else { dashCatchupChecked = false; await renderDashboard(); }
   } catch (e) {
@@ -8183,9 +11529,21 @@ document.addEventListener('click', (e) => {
   const t = e.target.closest('[data-action]');
   if (!t) return;
   const a = t.dataset.action;
+  // Build 12 FF: a lesson row/chip drag-drop just completed — swallow the
+  // native click that follows it (dashDragPointerDown set this) so the drop
+  // doesn't ALSO re-open the lesson.
+  if (a === 'open-schedule-lesson' && dashJustDragged) { dashJustDragged = false; return; }
   if (a === 'home') { e.preventDefault(); location.hash = '#/'; }
   else if (a === 'go-courses') { e.preventDefault(); location.hash = '#/courses'; }
   else if (a === 'go-settings') { e.preventDefault(); location.hash = '#/settings'; }
+  else if (a === 'go-mindmap') { e.preventDefault(); location.hash = '#/mindmap'; }
+  else if (a === 'go-analysis') { e.preventDefault(); location.hash = '#/analysis'; }
+  else if (a === 'go-search') { e.preventDefault(); openSearchPalette(); }
+  else if (a === 'open-analysis-course') location.hash = `#/analysis/course/${t.dataset.id}`;
+  else if (a === 'analysis-back') location.hash = '#/analysis';
+  else if (a === 'analysis-generate') confirmAnalysisGenerate(t.dataset.courseId);
+  else if (a === 'analysis-exam') analysisSelectExam(t.dataset.examId);
+  else if (a === 'open-revision') openRevisionFlow(t.dataset.examId, t.dataset.courseName, t.dataset.examName);
   else if (a === 'show-health') showHealthModal();
   else if (a === 'new-semester') newSemester();
   else if (a === 'regen-schedule') regenSchedule();
@@ -8220,6 +11578,8 @@ document.addEventListener('click', (e) => {
   else if (a === 'choose-notes') noteConceptPicker(t.dataset.id);
   else if (a === 'reanalyze-all') confirmReanalyzeAll(t.dataset.id);
   else if (a === 'regen-all') confirmRegenAll(t.dataset.id);
+  else if (a === 'rename-concept') renameConcept(t.dataset.id, t.dataset.name);
+  else if (a === 'del-concept') delConcept(t.dataset.id, t.dataset.name);
   else if (a === 'note-customize') noteCustomizeModal(t.dataset.id);
   else if (a === 'cancel-job') cancelJob(t.dataset.id);
   else if (a === 'open-note') {
@@ -8245,6 +11605,7 @@ document.addEventListener('click', (e) => {
       ? `#/course/${t.dataset.courseId}/canvas/${t.dataset.conceptId}?from=schedule`
       : '#/study/' + t.dataset.itemId;
   }
+  else if (a === 'reset-schedule-move') { e.stopPropagation(); resetScheduleMove(t.dataset.examId, t.dataset.conceptId); }
   else if (a === 'canvas-select-lesson') {
     // In-place switch (course OR schedule mode; canvasSwitchLesson handles a
     // cross-course target in schedule mode). Fall back to a hash nav only if the
@@ -8319,6 +11680,7 @@ document.addEventListener('click', (e) => {
   else if (a === 'toggle-done') toggleDone(t.dataset.conceptId, t.dataset.done === '1');
   else if (a === 'toggle-done-stop') { e.stopPropagation(); toggleDone(t.dataset.conceptId, t.dataset.done === '1'); }
   else if (a === 'quiz-exit') quizExit();
+  else if (a === 'quiz-cancel') quizCancel();
   else if (a === 'quiz-answer-mcq') quizAnswerMcq(Number(t.dataset.idx));
   else if (a === 'quiz-submit-short') quizSubmitShort();
   else if (a === 'quiz-self-correct') quizSelfCorrect();
@@ -8504,7 +11866,19 @@ function authScreenHtml(mode, initialError) {
       submitLabel = 'Continue';
       bodyHtml = `${authField({ id: 'au-email', label: 'Email', type: 'email', autocomplete: 'email', value: authForgotEmail })}`;
     }
-    footerHtml = `<p class="mt-5 text-center text-sm text-muted"><button type="button" data-auth-link="login" class="link font-medium">Back to log in</button></p>`;
+    // G8: on the reset step, add a way back to the email step (e.g. to fix a
+    // mistyped address) without leaving the forgot-password flow entirely.
+    // Reuses the SAME data-auth-link="forgot" wiring the entry point uses —
+    // that handler already resets authForgotStep to 'email' whenever the
+    // clicked link's mode is 'forgot' (see wireAuthCard), so no new handler
+    // is needed; the email field re-shows prefilled with the previous value
+    // (authForgotEmail), ready to edit rather than blank.
+    footerHtml = authForgotStep === 'reset'
+      ? `<p class="mt-5 flex items-center justify-between text-sm text-muted">
+          <button type="button" data-auth-link="forgot" class="link">Use a different email</button>
+          <button type="button" data-auth-link="login" class="link font-medium">Back to log in</button>
+        </p>`
+      : `<p class="mt-5 text-center text-sm text-muted"><button type="button" data-auth-link="login" class="link font-medium">Back to log in</button></p>`;
   }
 
   return `
@@ -8525,6 +11899,100 @@ function authScreenHtml(mode, initialError) {
     </div>`;
 }
 
+// ---------------------------------------------------------------------------
+// Animated self-drawing "Axiom" logo (premium brand mark — Build "logo1").
+// Real Inter ExtraBold (800) glyph outlines, extracted OFFLINE via
+// opentype.js against the actual Google Fonts Inter woff2 (decompressed with
+// wawoff2) — no font parsing at runtime, no new dependency shipped. The path
+// data below is the exact traced outline of each letterform.
+//
+// Technique (see theme.css's "Animated self-drawing Axiom logo" section for
+// the CSS half): each glyph is a <path> pair — one stroked (fill:none,
+// currentColor stroke) with pathLength="1" so stroke-dasharray/-dashoffset
+// can animate on a clean 0..1 scale regardless of real geometry, ONE
+// underneath filled (currentColor, opacity animates in once the stroke
+// finishes). The stroke "ink"s the letter on (dashoffset 1->0), then
+// crossfades to the solid fill, holds, fades out, and loops.
+//
+// IMPORTANT — why 5 separate glyphs, not one combined "Axiom" path: Chromium's
+// stroke-dasharray/-dashoffset rendering was empirically found to break (it
+// paints the WHOLE path solid regardless of dashoffset) once a single <path>
+// accumulates too many subpaths + a long combined length — reproduced with a
+// combined 8-subpath/~3400-unit "Axiom" path, both with pathLength
+// normalization AND raw geometric units, at multiple dash ratios. Each
+// individual letter (1-2 subpaths, a few hundred units) dashes correctly in
+// isolation, so the wordmark is 5 independent glyph paths instead.
+// The 5 letters stagger their draw-IN across a SHARED 2s cycle using 5 sets
+// of @keyframes (axiomWordStroke0..4 / axiomWordFill0..4) rather than
+// `animation-delay` — a delay shifts a letter's entire loop including its
+// fade-out/reset, so with 5 independent delays each letter blinked invisible
+// at a DIFFERENT moment near the loop boundary (looked glitchy). Baking the
+// stagger into the keyframe percentages instead keeps the fade-out/reset
+// (90%-100%) IDENTICAL across all 5, so the whole word vanishes and redraws
+// as one clean unit every cycle.
+//
+// Reduced motion needs no special-casing here: theme.css §6's existing
+// global `@media (prefers-reduced-motion: reduce) { *{animation:none!important} }`
+// kills every one of these animations outright, leaving the plain rest
+// state declared in CSS (fill opacity 1, stroke opacity 0) — a finished,
+// static, filled word/mark.
+const AXIOM_WORDMARK_VB = '-4.41 -163.785 640.754 174.836';
+const AXIOM_MARK_VB = '-5.41 -155.508 164.727 165.508';
+const AXIOM_MARK_D = 'M42.871 0L4.590 0L53.125-145.508L99.316-145.508L149.316 0L110.645 0L90.430-63.574Q85.547-79.492 81.006-97.412Q76.465-115.332 71.875-134.570L79.590-134.570Q75.195-115.234 71.094-97.314Q66.992-79.395 62.402-63.574L42.871 0M116.406-30.957L37.598-30.957L37.598-57.324L116.406-57.324';
+// Center of AXIOM_MARK_VB — the pivot the sheen-sweep rotation turns around
+// (see axiomLogoSvg('mark')), so the highlight tilts in place with zero
+// displacement rather than swinging off from an arbitrary origin.
+const AXIOM_MARK_CX = -5.41 + 164.727 / 2;
+const AXIOM_MARK_CY = -155.508 + 165.508 / 2;
+// Per-glyph outline paths for "Axiom" (A, x, i, o, m), in the SAME coordinate
+// space as AXIOM_WORDMARK_VB (so they line up with no extra offsetting).
+const AXIOM_WORDMARK_GLYPHS = [
+  'M42.871 0L4.590 0L53.125-145.508L99.316-145.508L149.316 0L110.645 0L90.430-63.574Q85.547-79.492 81.006-97.412Q76.465-115.332 71.875-134.570L79.590-134.570Q75.195-115.234 71.094-97.314Q66.992-79.395 62.402-63.574L42.871 0M116.406-30.957L37.598-30.957L37.598-57.324L116.406-57.324',
+  'M192.578 0L157.129 0L199.023-69.336L199.023-42.773L159.180-109.180L195.313-109.180L203.711-93.555Q208.203-85.059 211.914-76.318Q215.625-67.578 219.434-59.375L207.422-59.375Q211.426-67.480 215.234-76.270Q219.043-85.059 223.730-93.555L232.520-109.180L268.066-109.180L227.246-42.676L227.246-69.043L269.531 0L233.594 0L223.047-18.945Q218.359-27.441 214.453-36.328Q210.547-45.215 206.641-53.320L218.652-53.320Q214.941-45.215 211.182-36.328Q207.422-27.441 202.930-18.945',
+  'M318.066 0L283.984 0L283.984-109.180L318.066-109.180L318.066 0M300.977-121.973Q293.750-121.973 288.574-126.807Q283.398-131.641 283.398-138.379Q283.398-145.215 288.574-150Q293.750-154.785 300.977-154.785Q308.301-154.785 313.477-150.049Q318.652-145.312 318.652-138.379Q318.652-131.543 313.477-126.758Q308.301-121.973 300.977-121.973',
+  'M391.309 2.051Q374.219 2.051 361.914-5.029Q349.609-12.109 343.018-24.756Q336.426-37.402 336.426-54.199Q336.426-71.094 343.018-83.740Q349.609-96.387 361.914-103.467Q374.219-110.547 391.309-110.547Q408.398-110.547 420.703-103.467Q433.008-96.387 439.551-83.740Q446.094-71.094 446.094-54.199Q446.094-37.402 439.551-24.756Q433.008-12.109 420.703-5.029Q408.398 2.051 391.309 2.051M391.309-24.023Q397.852-24.023 402.344-27.832Q406.836-31.641 409.131-38.477Q411.426-45.312 411.426-54.395Q411.426-63.477 409.131-70.264Q406.836-77.051 402.344-80.762Q397.852-84.473 391.309-84.473Q384.766-84.473 380.273-80.762Q375.781-77.051 373.486-70.264Q371.191-63.477 371.191-54.395Q371.191-45.312 373.486-38.477Q375.781-31.641 380.273-27.832Q384.766-24.023 391.309-24.023',
+  'M498.535 0L464.453 0L464.453-109.180L495.801-109.180L497.754-80.859L495.410-80.859Q497.949-91.504 502.979-98.047Q508.008-104.590 514.697-107.617Q521.387-110.645 528.809-110.645Q540.527-110.645 547.705-103.125Q554.883-95.605 558.789-78.516L554.980-78.516Q557.617-89.941 563.281-97.070Q568.945-104.199 576.563-107.422Q584.180-110.645 592.383-110.645Q602.637-110.645 610.498-106.201Q618.359-101.758 622.852-93.506Q627.344-85.254 627.344-73.633L627.344 0L593.359 0L593.359-65.918Q593.359-74.219 589.014-78.516Q584.668-82.812 577.930-82.812Q573.145-82.812 569.580-80.664Q566.016-78.516 564.160-74.658Q562.305-70.801 562.305-65.527L562.305 0L529.590 0L529.590-66.406Q529.590-73.926 525.391-78.369Q521.191-82.812 514.355-82.812Q509.668-82.812 506.104-80.664Q502.539-78.516 500.537-74.561Q498.535-70.605 498.535-64.844',
+];
+
+// Returns the animated logo's markup. variant: 'wordmark' (full "Axiom",
+// 5 staggered glyphs) | 'mark' (just the "A", for the sidebar tile). Colors
+// via `currentColor` — callers set `color` in CSS on the mount point.
+function axiomLogoSvg(variant) {
+  if (variant === 'mark') {
+    // Bare solid "A" (currentColor fill, always opacity 1 — never disappears)
+    // plus a soft light "sheen" band clipped to the glyph's own shape and
+    // swept across it periodically via a CSS-only translateX animation (see
+    // .axiom-logo-sheen / @keyframes axiomSheen in theme.css). The sheen
+    // rect is authored centered on the SAME point the wrapping <g> rotates
+    // around (AXIOM_MARK_CX/CY, the glyph's viewBox center) so the SVG
+    // `transform="rotate(...)"` tilts it in place with no displacement —
+    // the CSS translateX then slides it along its own (pre-rotation) local
+    // x-axis, which reads as a gentle diagonal sweep once the tilt is
+    // applied. Single instance (sidebar-only), so fixed element ids are fine.
+    return `<svg class="axiom-logo axiom-logo-mark" viewBox="${AXIOM_MARK_VB}" xmlns="http://www.w3.org/2000/svg" aria-label="Axiom" role="img">
+      <defs>
+        <clipPath id="axiom-mark-clip"><path d="${AXIOM_MARK_D}"></path></clipPath>
+        <linearGradient id="axiom-mark-sheen" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stop-color="#ffffff" stop-opacity="0"></stop>
+          <stop offset="50%" stop-color="#ffffff" stop-opacity="0.75"></stop>
+          <stop offset="100%" stop-color="#ffffff" stop-opacity="0"></stop>
+        </linearGradient>
+      </defs>
+      <path class="axiom-logo-fill" d="${AXIOM_MARK_D}"></path>
+      <g clip-path="url(#axiom-mark-clip)">
+        <g transform="rotate(-18 ${AXIOM_MARK_CX} ${AXIOM_MARK_CY})">
+          <rect class="axiom-logo-sheen" x="${AXIOM_MARK_CX - 25}" y="${AXIOM_MARK_CY - 300}" width="50" height="600" fill="url(#axiom-mark-sheen)"></rect>
+        </g>
+      </g>
+    </svg>`;
+  }
+  const glyphs = AXIOM_WORDMARK_GLYPHS.map((d, i) => `<g class="axiom-logo-glyph-${i}">
+        <path class="axiom-logo-fill" d="${d}" pathLength="1"></path>
+        <path class="axiom-logo-stroke" d="${d}" pathLength="1" fill="none"></path>
+      </g>`).join('');
+  return `<svg class="axiom-logo axiom-logo-wordmark" viewBox="${AXIOM_WORDMARK_VB}" xmlns="http://www.w3.org/2000/svg" aria-label="Axiom" role="img">${glyphs}</svg>`;
+}
+
 // The brand/hero panel (left column on wide viewports, compact top band when
 // stacked). Mounted once per auth-gate lifetime (independent of mode swaps)
 // so its tagline rotator keeps a stable timer — see mountAuthHero/teardownAuthHero.
@@ -8532,8 +12000,7 @@ function authHeroHtml() {
   return `
     <div class="auth-hero-inner">
       <div class="auth-hero-brand">
-        <div class="auth-monogram auth-monogram-lg">A</div>
-        <span class="auth-wordmark">Axiom</span>
+        ${axiomLogoSvg('wordmark')}
       </div>
       <h2 class="auth-hero-title">Study smarter,<br>not longer.</h2>
       <div class="auth-tagline" id="auth-tagline"></div>
@@ -8568,8 +12035,8 @@ function mountAuthHero(container) {
       setTimeout(() => {
         idx = (idx + 1) % AUTH_TAGLINES.length;
         paint();
-      }, 260);
-    }, 4200);
+      }, 180);
+    }, 2600);
   }
   authHeroController = {
     teardown() {
@@ -8611,9 +12078,11 @@ function mountAuthBg(container) {
   }
 
   const accents = ['grape', 'mint', 'peach', 'sky', 'lilac'];
+  // Travel range roughly doubled from the original (was ±30px-ish) so the
+  // cursor-follow is CLEARLY visible, not a subtle nudge.
   const factors = [
-    { x: 24, y: 18 }, { x: -30, y: 16 }, { x: 20, y: -22 },
-    { x: -18, y: -26 }, { x: 26, y: 12 },
+    { x: 46, y: 34 }, { x: -58, y: 30 }, { x: 38, y: -42 },
+    { x: -34, y: -50 }, { x: 50, y: 24 },
   ];
   const blobEls = accents.map((accent, i) => {
     const wrap = document.createElement('div');
@@ -8634,8 +12103,10 @@ function mountAuthBg(container) {
   window.addEventListener('mousemove', onMove, { passive: true });
 
   const tick = () => {
-    eased.x += (pointer.x - eased.x) * 0.06;
-    eased.y += (pointer.y - eased.y) * 0.06;
+    // Snappier lerp (was 0.06) so the background is clearly, promptly
+    // reactive to the pointer rather than a slow, barely-visible drift.
+    eased.x += (pointer.x - eased.x) * 0.16;
+    eased.y += (pointer.y - eased.y) * 0.16;
     blobEls.forEach((el, i) => {
       const f = factors[i];
       el.style.transform = `translate3d(${(eased.x * f.x).toFixed(2)}px, ${(eased.y * f.y).toFixed(2)}px, 0)`;
@@ -8744,6 +12215,44 @@ function wireAuthCard(slot) {
     };
     pw.addEventListener('input', updateStrength);
     updateStrength();
+  }
+
+  // G5: signup-only inline per-field validation (email format, password
+  // length, confirm-match) on blur/input — purely visual feedback next to
+  // each field; the submit handler below keeps its own checks + banner
+  // unchanged, so a valid submission is never blocked by this.
+  if (authMode === 'signup') {
+    const emailEl = slot.querySelector('#au-email');
+    const confirmEl = slot.querySelector('#au-confirm');
+    const setFieldHint = (input, message) => {
+      if (!input) return;
+      const wrap = input.closest('.auth-field');
+      if (!wrap) return;
+      let hintEl = wrap.querySelector('.auth-field-error');
+      if (!hintEl) {
+        hintEl = document.createElement('p');
+        hintEl.className = 'auth-field-error';
+        wrap.appendChild(hintEl);
+      }
+      hintEl.textContent = message || '';
+      hintEl.classList.toggle('show', !!message);
+    };
+    const validateEmail = () => {
+      const v = (emailEl.value || '').trim();
+      setFieldHint(emailEl, v && !isValidEmail(v) ? 'Enter a valid email address.' : '');
+    };
+    const validatePassword = () => {
+      const v = pw.value || '';
+      setFieldHint(pw, v && v.length < 6 ? 'Must be at least 6 characters.' : '');
+      validateConfirm();
+    };
+    function validateConfirm() {
+      const v = confirmEl.value || '';
+      setFieldHint(confirmEl, v && v !== pw.value ? 'Passwords do not match.' : '');
+    }
+    if (emailEl) { emailEl.addEventListener('blur', validateEmail); emailEl.addEventListener('input', validateEmail); }
+    if (pw) { pw.addEventListener('blur', validatePassword); pw.addEventListener('input', validatePassword); }
+    if (confirmEl) { confirmEl.addEventListener('blur', validateConfirm); confirmEl.addEventListener('input', validateConfirm); }
   }
 
   const firstInput = slot.querySelector('input, select');
@@ -8957,8 +12466,10 @@ function enterApp() {
   if (appEntered) { route(); return; }
   appEntered = true;
   refreshHealthPill();
+  initHealthPoll();
   initTaskTray();
   initPomodoro();
+  initSearchHotkey();
   initTheme();
   // Load the profile first so the header chip + dashboard greeting have the name
   // on the very first paint; route() runs whether the fetch succeeds or fails.

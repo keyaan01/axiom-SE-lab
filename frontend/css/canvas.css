@@ -312,6 +312,15 @@
   background: var(--surface-2);
 }
 
+/* Fix 1: a pinned AI conversation nested under the file/note it was pinned
+   from (canvasRenderFileList). Indented with a subtle hairline, mirroring
+   the nested-row treatment in mindmap.css's .mm-row-concept. */
+.canvas-file-row-child {
+  margin-left: 0.85rem;
+  padding-left: 0.6rem;
+  border-left: 1px solid var(--border);
+}
+
 .canvas-file-row-main {
   flex: 1 1 auto;
   min-width: 0;
@@ -500,6 +509,71 @@
   will-change: transform;
 }
 
+/* F3: empty-lesson-canvas discoverability hint. A sibling of .canvas-world
+   (not inside it), positioned against .canvas-scroll's own viewport so it
+   stays centered regardless of pan/zoom. pointer-events:none on the
+   container means it never blocks panning/zooming/dropping a file on the
+   dot-grid beneath it; only its own button opts back in. Toggled via
+   canvasUpdateEmptyHint (app.js) — hidden the instant any item or drawing
+   exists. */
+.canvas-empty-hint {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.9rem;
+  padding: 2rem;
+  text-align: center;
+  pointer-events: none;
+}
+.canvas-empty-hint[hidden] { display: none; }
+.canvas-empty-hint p {
+  max-width: 24rem;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+.canvas-empty-hint button {
+  pointer-events: auto;
+}
+
+/* Selection Core: rubber-band marquee. A plain DOM rect over .canvas-scroll
+   (SCREEN space, not #canvas-world — no pan/zoom transform to fight), sized
+   from JS in canvasStartMarqueeSelect. Mirrors .reader-snip-marquee's visual
+   treatment (dashed accent border + a soft tint). Appended after
+   #canvas-world/#canvas-empty-hint in the DOM so it paints on top of both
+   with no explicit z-index needed. */
+.canvas-marquee {
+  position: absolute;
+  border: 1.5px dashed var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  pointer-events: none;
+}
+
+/* Selection Core: a small, unobtrusive, always-on gesture hint (§3 pan
+   change — empty-drag now marquee-selects; pan moved to Space/middle-drag).
+   Pinned to the scroll viewport's corner (not #canvas-world) so it never
+   pans/zooms away, and never intercepts clicks. */
+.canvas-gesture-hint {
+  position: absolute;
+  left: 0.75rem;
+  bottom: 0.6rem;
+  z-index: 2;
+  margin: 0;
+  padding: 0.2rem 0.55rem;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  color: var(--text-subtle);
+  font-size: 0.7rem;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  user-select: none;
+}
+
 /* ---------- item cards ---------- */
 
 .canvas-item {
@@ -507,9 +581,13 @@
   display: flex;
   flex-direction: column;
   background: var(--surface);
-  border: 1px solid var(--border);
+  /* Visual fixes round: the old 1px var(--border) blended into the dot-grid
+     canvas in both themes — every card shares this shell (note #0, file
+     cards, image items, the AI card, the uploading placeholder), so a
+     stronger, higher-contrast border here lifts all of them at once. */
+  border: 1.5px solid var(--border-strong);
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-md);
   overflow: hidden;
   cursor: grab;
   user-select: none;
@@ -545,6 +623,11 @@
   display: block;
   pointer-events: none;
   background: var(--surface-2);
+  /* Visual fixes round: a thin inner line so the framed image reads as a
+     distinct object against the surrounding letterbox, not just a floating
+     picture — visible in both themes. */
+  border: 1px solid var(--border-strong);
+  box-sizing: border-box;
 }
 
 .canvas-item-thumb-placeholder {
@@ -1099,6 +1182,18 @@
    arrow tool, which keeps the user's chosen color. */
 .canvas-connector-line {
   filter: drop-shadow(0 0 2.5px rgba(176, 38, 255, 0.75));
+}
+
+/* Selection Core: a selected-drawing halo (sticky/rect/ellipse/text — the
+   only box-selectable drawing types; see canvasDrawingIsBoxSelectable). SVG
+   has no built-in "selected" state, so canvasBuildDrawingEl adds this class
+   itself on every repaint when the drawing's id is in
+   state.selection.drawings. A drop-shadow glow works uniformly across every
+   element shape it can be applied to here — a plain <rect>/<ellipse>, a
+   <foreignObject> (text), or a <g> (sticky) — mirroring .canvas-item.selected
+   for item cards and .canvas-connector-line's own glow technique above. */
+.canvas-drawing-selected {
+  filter: drop-shadow(0 0 2px var(--primary)) drop-shadow(0 0 5px color-mix(in srgb, var(--primary) 60%, transparent));
 }
 
 /* Committed text/sticky content renders into a <foreignObject> — real DOM

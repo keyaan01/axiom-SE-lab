@@ -94,10 +94,18 @@
        (window.jspdf.jsPDF). If it fails to load, the reader download falls back to the
        clean original PDF. -->
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-  <link rel="stylesheet" href="/css/theme.css?v=canvas9" />
-  <link rel="stylesheet" href="/css/reader.css?v=canvas9" />
-  <link rel="stylesheet" href="/css/canvas.css?v=canvas9" />
+  <link rel="stylesheet" href="/css/theme.css?v=b16" />
+  <link rel="stylesheet" href="/css/reader.css?v=b16" />
+  <link rel="stylesheet" href="/css/canvas.css?v=b16" />
+  <link rel="stylesheet" href="/css/mindmap.css?v=b16" />
+  <link rel="stylesheet" href="/css/analysis.css?v=b16" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/web/pdf_viewer.css" />
+  <!-- d3 (Build 10 curriculum mind map, REV 2 — minimal/Obsidian graph view):
+       forceSimulation/forceLink/forceManyBody/forceCollide/forceX/forceY run
+       LIVE (draggable nodes, organic settle), plus quadtree for hit-testing.
+       mindmap.js falls back to a static golden-angle layout (no physics/drag)
+       if this fails to load (frontend/MINDMAP.md §2). -->
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
   <script type="module">
     // Immersive PDF reader (custom canvas rebuild): load PDF.js's core
     // library as an ES module and expose it on window so the classic
@@ -123,16 +131,22 @@
   <style>
     /* Left sidebar nav rows (Build 6, Step 3) — plain CSS rather than Tailwind
        utility classes so the active/hover states are simple to toggle from JS
-       (classList.toggle('active', ...)) without juggling long class strings. */
+       (classList.toggle('active', ...)) without juggling long class strings.
+       Further-fixes pass: the collapsed and expanded states now differ ONLY in
+       animatable properties (max-width/opacity, never `display`; one stable
+       justify-content/padding, never a hover-only flip) so everything tweens
+       together with #sidebar's width transition below instead of snapping a
+       frame ahead of it. */
     .sidebar-nav-item {
       display: flex;
       align-items: center;
-      justify-content: center;
+      justify-content: flex-start;
+      gap: .625rem;
       width: 100%;
       border-radius: 0.6rem;
       border: none;
       background: none;
-      padding: 0.5rem 0.625rem;
+      padding: 0.6rem 0.625rem;
       font-family: inherit;
       font-size: 0.875rem;
       font-weight: 500;
@@ -142,43 +156,142 @@
       cursor: pointer;
       transition: background-color .15s ease, color .15s ease;
     }
-    .sidebar-nav-item { padding: 0.6rem 0; }
     .sidebar-nav-item svg { flex-shrink: 0; }
-    .sidebar-nav-item span { display: none; } /* icon-only rail */
+    /* Fixed-width centered slot for a row's LEADING icon so icons of different
+       intrinsic sizes (the 10px health dot, the 28px avatar, the 16px logout
+       glyph) all center on the SAME vertical axis as each other and the 18px
+       nav icons — instead of left-aligning at the padding and looking staggered
+       when collapsed. A larger icon (the avatar) simply center-overflows the
+       slot symmetrically (overflow stays visible), keeping its center on-axis. */
+    .sidebar-icon-slot {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.125rem;
+      flex-shrink: 0;
+    }
+    /* Label stays in the DOM at all times (never `display:none` — that can't
+       animate) and is clipped to zero width instead; #sidebar's own
+       overflow:hidden also masks it so nothing peeks out past the icon-only
+       collapsed rail. Scoped to :last-child (not every span) — Fix 4 gave the
+       health pill and user rows a leading icon/avatar that is ALSO a <span>
+       (the status dot; the initials-avatar fallback), and an unscoped `span`
+       selector collapsed those to max-width:0 too, making them invisible
+       while collapsed. The label is always the last span in every row (nav
+       icon+label, dot+label, avatar+label), so :last-child reveals only it. */
+    .sidebar-nav-item > span:last-child {
+      display: inline-block;
+      max-width: 0;
+      opacity: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      transition: max-width var(--dur) var(--ease-spring), opacity .15s ease;
+    }
     .sidebar-nav-item:hover { background-color: var(--surface-2); color: var(--text); }
     .sidebar-nav-item.active { background-color: var(--surface-2); color: var(--text); }
+
+    /* Build 13c: hover-expand sidebar. #sidebar is a flex child of the
+       `.flex.min-h-screen` shell (index.html body), and #view's wrapper is its
+       flex-1 sibling — so animating #sidebar's WIDTH reflows #view (and every
+       full-bleed view mounted inside it: the canvas shell, the mind-map's
+       absolutely-positioned .mm-root panels) rightward for free. No JS, no
+       hardcoded content offset anywhere. overflow:hidden lets the growing rail
+       clip/reveal labels like a mask instead of them spilling out mid-tween. */
+    #sidebar {
+      transition: width var(--dur) var(--ease-spring);
+      overflow: hidden;
+    }
+    #sidebar:hover { width: 14rem; }
+    /* Labels reveal with a short delay so they fade in as the rail settles
+       rather than racing the width tween open (and fade back out immediately,
+       no delay, on mouse-away — the base rule above has none). */
+    #sidebar:hover .sidebar-nav-item > span:last-child {
+      max-width: 10rem;
+      opacity: 1;
+      transition-delay: .05s;
+    }
+    /* Accessibility batch, B3: keyboard Tab (focus-within) reveals the same
+       labels that :hover does, so a keyboard/touch user tabbing through the
+       collapsed rail can see which icon they're on, not just mouse hover. */
+    #sidebar:focus-within .sidebar-nav-item > span:last-child {
+      max-width: 10rem;
+      opacity: 1;
+    }
+    /* Bottom cluster (health pill + #sidebar-user, built by renderSidebarUser)
+       now behaves exactly like the nav rows above (Build 13 FF2, Fix 4):
+       #health-pill carries .sidebar-nav-item itself (dot + revealable label),
+       and renderSidebarUser() renders two .sidebar-nav-item rows (profile,
+       log out) — so everything left-aligns collapsed and reveals its label on
+       hover in lockstep with the nav, with no separate centered layout to
+       snap out of.  */
+
+    /* Fix 2: on the two full-bleed routes (mind map, canvas) the hover-expand
+       rail above PUSHES #view's flex-1 sibling (that's the point on ordinary
+       scrollable pages) — but those two views recompute their own internal
+       layout from that column's width (mmResize; the canvas board), so they
+       visibly resized while the cursor sat over the menu. Scoped to
+       body.fullbleed-view (toggled in app.js route()) only — every other page
+       keeps today's push behaviour untouched. Takes #sidebar out of flow so
+       its width no longer affects the flex layout at all, then offsets the
+       content column by the rail's COLLAPSED width so the at-rest look is
+       pixel-identical to the in-flow layout; hovering to 14rem then overlays
+       the content instead of reflowing it. z-index 45 sits above ordinary
+       content but below the reader(55)/pomodoro(60)/auth(70)/modals(75)/
+       toasts(80) stack. */
+    body.fullbleed-view #sidebar {
+      position: fixed;
+      left: 0;
+      top: 0;
+      height: 100vh;
+      z-index: 45;
+    }
+    body.fullbleed-view #sidebar + div {
+      margin-left: 4rem; /* matches the collapsed rail's w-16 */
+    }
   </style>
 </head>
 <body class="min-h-screen bg-paper text-ink antialiased">
   <div class="flex min-h-screen">
     <aside id="sidebar" class="sticky top-0 flex h-screen w-16 shrink-0 flex-col border-r border-neutral-200 bg-white px-2 py-4">
-      <button data-action="home" title="Home" class="mb-6 flex justify-center py-1">
-        <span class="badge-brand flex h-9 w-9 items-center justify-center rounded-xl text-sm font-bold">A</span>
-      </button>
-      <nav class="flex flex-col gap-1">
-        <button data-action="home" data-nav="home" class="sidebar-nav-item">
+      <nav class="mt-1 flex flex-col gap-1">
+        <button data-action="home" data-nav="home" class="sidebar-nav-item" title="Home" aria-label="Home">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5L12 4l8 6.5"/><path d="M6 9.5V19a1 1 0 001 1h3v-5a2 2 0 012-2 2 2 0 012 2v5h3a1 1 0 001-1V9.5"/></svg>
           <span>Home</span>
         </button>
-        <button data-action="go-courses" data-nav="courses" class="sidebar-nav-item">
+        <button data-action="go-courses" data-nav="courses" class="sidebar-nav-item" title="Courses" aria-label="Courses">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h6a4 4 0 014 4v13a3 3 0 00-3-3H2z"/><path d="M22 4h-6a4 4 0 00-4 4v13a3 3 0 013-3h7z"/></svg>
           <span>Courses</span>
         </button>
-        <button data-action="open-pomodoro" data-nav="pomodoro" class="sidebar-nav-item">
+        <button data-action="go-mindmap" data-nav="mindmap" class="sidebar-nav-item" title="Mind map" aria-label="Mind map">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="1.6"/><circle cx="18" cy="4.5" r="1.6"/><circle cx="19" cy="14" r="1.6"/><circle cx="7" cy="18" r="1.6"/><circle cx="13" cy="11" r="1.9"/><path d="M6.3 7.1L11.4 10M14.7 10.2l3.6-4.4M14.8 12.2l3.4 1.4M11.8 12.7L7.7 16.7"/></svg>
+          <span>Mind map</span>
+        </button>
+        <button data-action="go-analysis" data-nav="analysis" class="sidebar-nav-item" title="Analysis" aria-label="Analysis">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 17V11"/><path d="M12 17V7"/><path d="M16 17v-4"/></svg>
+          <span>Analysis</span>
+        </button>
+        <button data-action="open-pomodoro" data-nav="pomodoro" class="sidebar-nav-item" title="Pomodoro" aria-label="Pomodoro">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M9 2h6"/></svg>
           <span>Pomodoro</span>
         </button>
-        <button data-action="go-settings" data-nav="settings" class="sidebar-nav-item">
+        <button data-action="go-settings" data-nav="settings" class="sidebar-nav-item" title="Settings" aria-label="Settings">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M21 12h-2.5M5.5 12H3M18.36 5.64l-1.77 1.77M7.41 16.59l-1.77 1.77M18.36 18.36l-1.77-1.77M7.41 7.41L5.64 5.64"/></svg>
           <span>Settings</span>
+        </button>
+        <button data-action="go-search" data-nav="search" class="sidebar-nav-item" title="Search (Ctrl/Cmd+K)" aria-label="Search (Ctrl/Cmd+K)">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          <span>Search</span>
         </button>
       </nav>
       <div class="flex-1"></div>
       <div id="sidebar-bottom" class="border-t border-neutral-200 pt-3">
-        <button data-action="show-health" id="health-pill" title="System status"
-          class="mb-2 flex w-full items-center justify-center rounded-lg py-2 hover:bg-neutral-50">
-          <span class="h-2.5 w-2.5 rounded-full bg-neutral-300"></span>
+        <button data-action="show-health" id="health-pill" title="System status" aria-label="System status" class="sidebar-nav-item mb-1">
+          <span class="sidebar-icon-slot"><span class="h-2.5 w-2.5 shrink-0 rounded-full bg-neutral-300"></span></span><span>Checking…</span>
         </button>
+        <!-- G7: compact theme toggle restored to the sidebar (filled by
+             renderSidebarThemeToggle() in app.js); the full 3-way control also
+             stays in Settings (#theme-toggle) — both re-render together. -->
+        <div id="sidebar-theme-toggle" class="mb-1"></div>
         <div id="sidebar-user"></div>
       </div>
     </aside>
@@ -187,8 +300,9 @@
     </div>
   </div>
 
-  <script src="/js/api.js"></script>
-  <script src="/js/ui.js"></script>
-  <script src="/js/app.js?v=canvas9"></script>
+  <script src="/js/api.js?v=b16"></script>
+  <script src="/js/ui.js?v=b16"></script>
+  <script src="/js/mindmap.js?v=b16"></script>
+  <script src="/js/app.js?v=b16a"></script>
 </body>
 </html>

@@ -29,7 +29,7 @@ const api = {
   post(p, b) { return this._req('POST', p, b); },
   patch(p, b) { return this._req('PATCH', p, b); },
   put(p, b) { return this._req('PUT', p, b); },
-  del(p) { return this._req('DELETE', p); },
+  del(p, b) { return this._req('DELETE', p, b); },
 
   // Multipart upload (FormData) — used for file uploads.
   async upload(path, formData) {

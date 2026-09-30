@@ -204,6 +204,27 @@ body {
 .card-interactive:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
 .card-interactive:active { transform: scale(.99); }
 
+/* Dashboard lesson (concept) rows lift + float up more on hover (Build 14 FF).
+   Scoped class (on lessonRow) so ONLY the dashboard schedule rows get the
+   stronger lift — not every .card-interactive in the app. Driven by a
+   transition (not a keyframe) so it never fights .rise-in's entrance animation
+   (an animation override would replay `rise` on un-hover); --ease-out gives a
+   gentle overshoot so it reads as floating up. Rules come AFTER
+   .card-interactive so they win on equal specificity. Under reduced-motion the
+   transition just settles instantly (still lifts, no motion). */
+.dash-float { position: relative; transition: transform var(--dur) var(--ease-out), box-shadow var(--dur) var(--ease-out); }
+.dash-float:hover { transform: translateY(-9px) scale(1.03); box-shadow: var(--shadow-lg); z-index: 2; }
+.dash-float:active { transform: translateY(-5px) scale(1.01); }
+
+/* Visual fixes round: in light mode --surface (#FFFFFF) is nearly identical
+   to --bg (#FAF8FF), and the faint --border + --shadow-sm leave cards almost
+   invisible against the page. Dark mode's surface/bg/border already contrast
+   well, so this rule is scoped to light only and leaves dark untouched. */
+:root:not(.dark) .card {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+}
+
 /* Surfaces */
 .surface   { background: var(--surface); }
 .surface-2 { background: var(--surface-2); }
@@ -252,6 +273,44 @@ select.field-input { cursor: pointer; }
 .chip-sky   { background: var(--sky-c);   color: var(--on-sky-c); }
 .chip-lilac { background: var(--lilac-c); color: var(--on-lilac-c); }
 .chip-lemon { background: var(--lemon-c); color: var(--on-lemon-c); }
+.chip-neutral { background: var(--surface-3); color: var(--text-muted); }
+
+/* Course-card stat chips (Build 13 FF2, Fix 1): a tiny icon+count pill for
+   the materials/concepts/notes row — calm, token-based, correct in both
+   themes. The full label lives in the chip's title tooltip only. */
+.course-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .2rem .5rem;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  color: var(--text-muted);
+  font-size: .72rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+.course-stat svg { width: 13px; height: 13px; opacity: .85; }
+
+/* Destructive icon-button variant (Courses page redesign — delete controls). */
+.icon-btn-danger:hover { background: var(--danger-c); color: var(--danger); }
+
+/* Course "app-icon" tile (Courses page redesign): fixed square sizing for the
+   accentTileStyle() gradient — colors/glow come from the inline style, this
+   just handles shape + centering the initials. */
+.course-tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: var(--r-lg);
+  font-weight: 700;
+  font-size: .95rem;
+  letter-spacing: -.01em;
+  flex-shrink: 0;
+}
 
 .dot {
   display: inline-block;
@@ -367,6 +426,179 @@ select.field-input { cursor: pointer; }
    text-white (those flip with the theme and invert this specific mark). */
 .badge-brand { background: var(--primary); color: var(--on-primary); }
 
+/* ---- Animated self-drawing "Axiom" logo ----
+   Real Inter ExtraBold (800) glyph outlines (extracted offline via
+   opentype.js — see the build notes in app.js above axiomLogoSvg()), inked on
+   with a stroke-dasharray/-dashoffset draw, then crossfaded to a solid fill,
+   held, faded out, and looped. `pathLength="1"` on every <path> normalizes
+   dash math to a 0..1 scale regardless of the glyph's real geometry.
+   `currentColor` drives both fill and stroke, so each mount site (sidebar
+   badge, auth hero) themes it just by setting `color`.
+   IMPORTANT: each letter is its OWN <path> pair — Chromium's dasharray/
+   dashoffset rendering breaks (paints the WHOLE path regardless of offset)
+   once a single <path> accumulates too many subpaths + a long combined
+   length (confirmed empirically against a combined 5-letter path); five
+   short per-letter paths dash correctly.
+   Reduced motion: no extra handling needed here — theme.css §6's existing
+   global `@media (prefers-reduced-motion: reduce) { *{animation:none!important} }`
+   kills every animation below outright, leaving the plain (non-keyframe)
+   rest state — fill opacity 1, stroke opacity 0 — i.e. a finished, static,
+   filled word/mark. */
+.axiom-logo { overflow: visible; display: block; }
+.axiom-logo-stroke { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; opacity: 0; }
+.axiom-logo-fill { fill: currentColor; opacity: 1; }
+
+/* Wordmark ("Axiom", 5 letters): each glyph gets its own draw-in window
+   staggered across a SHARED 2s cycle (via 5 sets of keyframes, NOT
+   animation-delay — a delay shifts a letter's whole loop including its
+   fade-out/reset, so letters would blink invisible one at a time near the
+   loop point; baking the stagger into the keyframe offsets instead lets
+   every letter fade out and reset TOGETHER at 90-97%, so the whole word
+   vanishes and redraws as one clean unit). */
+.axiom-logo-wordmark .axiom-logo-stroke {
+  stroke-width: 6.5;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation-duration: 2s;
+  animation-timing-function: cubic-bezier(.5, 0, .4, 1);
+  animation-iteration-count: infinite;
+  animation-fill-mode: backwards; /* show the 0% keyframe (hidden), not the
+    base rest style, before each letter's own staggered start */
+}
+.axiom-logo-wordmark .axiom-logo-fill {
+  animation-duration: 2s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  animation-fill-mode: backwards;
+}
+.axiom-logo-wordmark .axiom-logo-glyph-0 .axiom-logo-stroke { animation-name: axiomWordStroke0; }
+.axiom-logo-wordmark .axiom-logo-glyph-0 .axiom-logo-fill   { animation-name: axiomWordFill0; }
+.axiom-logo-wordmark .axiom-logo-glyph-1 .axiom-logo-stroke { animation-name: axiomWordStroke1; }
+.axiom-logo-wordmark .axiom-logo-glyph-1 .axiom-logo-fill   { animation-name: axiomWordFill1; }
+.axiom-logo-wordmark .axiom-logo-glyph-2 .axiom-logo-stroke { animation-name: axiomWordStroke2; }
+.axiom-logo-wordmark .axiom-logo-glyph-2 .axiom-logo-fill   { animation-name: axiomWordFill2; }
+.axiom-logo-wordmark .axiom-logo-glyph-3 .axiom-logo-stroke { animation-name: axiomWordStroke3; }
+.axiom-logo-wordmark .axiom-logo-glyph-3 .axiom-logo-fill   { animation-name: axiomWordFill3; }
+.axiom-logo-wordmark .axiom-logo-glyph-4 .axiom-logo-stroke { animation-name: axiomWordStroke4; }
+.axiom-logo-wordmark .axiom-logo-glyph-4 .axiom-logo-fill   { animation-name: axiomWordFill4; }
+@keyframes axiomWordStroke0 {
+  0% { opacity: 0; stroke-dashoffset: 1; }
+  3% { opacity: 1; stroke-dashoffset: 1; }
+  25% { opacity: 1; stroke-dashoffset: 0; }
+  33% { opacity: 0; stroke-dashoffset: 0; }
+  90% { opacity: 0; stroke-dashoffset: 0; }
+  96% { opacity: 0; stroke-dashoffset: 0; }
+  97% { opacity: 0; stroke-dashoffset: 1; }
+  100% { opacity: 0; stroke-dashoffset: 1; }
+}
+@keyframes axiomWordFill0 {
+  0% { opacity: 0; }
+  25% { opacity: 0; }
+  33% { opacity: 1; }
+  90% { opacity: 1; }
+  96% { opacity: 0; }
+  100% { opacity: 0; }
+}
+@keyframes axiomWordStroke1 {
+  0% { opacity: 0; stroke-dashoffset: 1; }
+  11% { opacity: 1; stroke-dashoffset: 1; }
+  33% { opacity: 1; stroke-dashoffset: 0; }
+  41% { opacity: 0; stroke-dashoffset: 0; }
+  90% { opacity: 0; stroke-dashoffset: 0; }
+  96% { opacity: 0; stroke-dashoffset: 0; }
+  97% { opacity: 0; stroke-dashoffset: 1; }
+  100% { opacity: 0; stroke-dashoffset: 1; }
+}
+@keyframes axiomWordFill1 {
+  0% { opacity: 0; }
+  33% { opacity: 0; }
+  41% { opacity: 1; }
+  90% { opacity: 1; }
+  96% { opacity: 0; }
+  100% { opacity: 0; }
+}
+@keyframes axiomWordStroke2 {
+  0% { opacity: 0; stroke-dashoffset: 1; }
+  19% { opacity: 1; stroke-dashoffset: 1; }
+  41% { opacity: 1; stroke-dashoffset: 0; }
+  49% { opacity: 0; stroke-dashoffset: 0; }
+  90% { opacity: 0; stroke-dashoffset: 0; }
+  96% { opacity: 0; stroke-dashoffset: 0; }
+  97% { opacity: 0; stroke-dashoffset: 1; }
+  100% { opacity: 0; stroke-dashoffset: 1; }
+}
+@keyframes axiomWordFill2 {
+  0% { opacity: 0; }
+  41% { opacity: 0; }
+  49% { opacity: 1; }
+  90% { opacity: 1; }
+  96% { opacity: 0; }
+  100% { opacity: 0; }
+}
+@keyframes axiomWordStroke3 {
+  0% { opacity: 0; stroke-dashoffset: 1; }
+  27% { opacity: 1; stroke-dashoffset: 1; }
+  49% { opacity: 1; stroke-dashoffset: 0; }
+  57% { opacity: 0; stroke-dashoffset: 0; }
+  90% { opacity: 0; stroke-dashoffset: 0; }
+  96% { opacity: 0; stroke-dashoffset: 0; }
+  97% { opacity: 0; stroke-dashoffset: 1; }
+  100% { opacity: 0; stroke-dashoffset: 1; }
+}
+@keyframes axiomWordFill3 {
+  0% { opacity: 0; }
+  49% { opacity: 0; }
+  57% { opacity: 1; }
+  90% { opacity: 1; }
+  96% { opacity: 0; }
+  100% { opacity: 0; }
+}
+@keyframes axiomWordStroke4 {
+  0% { opacity: 0; stroke-dashoffset: 1; }
+  35% { opacity: 1; stroke-dashoffset: 1; }
+  57% { opacity: 1; stroke-dashoffset: 0; }
+  65% { opacity: 0; stroke-dashoffset: 0; }
+  90% { opacity: 0; stroke-dashoffset: 0; }
+  96% { opacity: 0; stroke-dashoffset: 0; }
+  97% { opacity: 0; stroke-dashoffset: 1; }
+  100% { opacity: 0; stroke-dashoffset: 1; }
+}
+@keyframes axiomWordFill4 {
+  0% { opacity: 0; }
+  57% { opacity: 0; }
+  65% { opacity: 1; }
+  90% { opacity: 1; }
+  96% { opacity: 0; }
+  100% { opacity: 0; }
+}
+
+/* Mark ("A" alone, bare sidebar glyph — no tile). The letter itself
+   (.axiom-logo-fill, shared base rule above) is ALWAYS solid opacity:1 —
+   no draw-in/fade-out here, it must never disappear in persistent chrome.
+   #sidebar-brand-mark sets `color` (below) so the currentColor fill reads
+   as brand purple against the sidebar surface in both themes.
+   The only motion is a soft light "sheen" clipped to the glyph's own shape
+   (see axiomLogoSvg('mark') in app.js for the <clipPath>/<linearGradient>
+   markup) sliding across it on a gentle, infrequent cadence: a quick ~1s
+   sweep once every 5.5s, idle the rest of the time — buttery, not
+   distracting. Reduced motion: the `*{animation:none!important}` rule in
+   §6 below drops .axiom-logo-sheen back to its own non-keyframe base
+   `transform` (off-glyph, see rule), which hides the sheen entirely while
+   the solid fill stays fully visible — a static purple "A". */
+#sidebar-brand-mark { color: var(--primary); }
+.axiom-logo-mark { width: 27px; height: 27px; }
+.axiom-logo-sheen {
+  transform: translateX(-170px);
+  animation: axiomSheen 5.5s ease-in-out infinite;
+  will-change: transform;
+}
+@keyframes axiomSheen {
+  0%   { transform: translateX(-170px); }
+  4%   { transform: translateX(-170px); }
+  22%  { transform: translateX(170px); }
+  100% { transform: translateX(170px); }
+}
+
 /* In-place content swap (dashboard List<->Calendar, Settings Saved-Prompts
    patch): replays the fadeSwap keyframe each time it's re-added post-reflow
    (see the classList remove/reflow/add dance in app.js). */
@@ -429,7 +661,7 @@ select.field-input { cursor: pointer; }
   background: conic-gradient(from 0deg at 50% 50%, var(--lilac-c), var(--sky-c), var(--peach-c), var(--mint-c), var(--lilac-c));
   filter: blur(70px);
   opacity: .22;
-  animation: authAuroraSpin 46s linear infinite;
+  animation: authAuroraSpin 22s linear infinite;
 }
 :root.dark .auth-bg::before { opacity: .15; }
 /* A soft vignette focuses the eye toward the centered card. */
@@ -466,10 +698,10 @@ select.field-input { cursor: pointer; }
   position: absolute;
   border-radius: 50%;
   filter: blur(70px);
-  opacity: .55;
-  animation: authBlobFloat 20s ease-in-out infinite alternate;
+  opacity: .68;
+  animation: authBlobFloat 10s ease-in-out infinite alternate;
 }
-:root.dark .auth-blob { opacity: .35; filter: blur(85px); }
+:root.dark .auth-blob { opacity: .46; filter: blur(85px); }
 
 .auth-blob-grape { background: var(--primary); }
 .auth-blob-mint  { background: var(--mint); }
@@ -477,16 +709,16 @@ select.field-input { cursor: pointer; }
 .auth-blob-sky   { background: var(--sky); }
 .auth-blob-lilac { background: var(--lilac); }
 
-.auth-blob-1 { width: 36vw; height: 36vw; max-width: 480px; max-height: 480px; top: 6%;  left: 4%;  animation-duration: 19s; }
-.auth-blob-2 { width: 28vw; height: 28vw; max-width: 380px; max-height: 380px; top: 58%; left: 70%; animation-duration: 23s; animation-delay: -4s; }
-.auth-blob-3 { width: 26vw; height: 26vw; max-width: 360px; max-height: 360px; top: 72%; left: 10%; animation-duration: 21s; animation-delay: -9s; }
-.auth-blob-4 { width: 30vw; height: 30vw; max-width: 420px; max-height: 420px; top: 2%;  left: 66%; animation-duration: 25s; animation-delay: -2s; }
-.auth-blob-5 { width: 22vw; height: 22vw; max-width: 320px; max-height: 320px; top: 36%; left: 42%; animation-duration: 27s; animation-delay: -13s; }
+.auth-blob-1 { width: 40vw; height: 40vw; max-width: 530px; max-height: 530px; top: 6%;  left: 4%;  animation-duration: 9s; }
+.auth-blob-2 { width: 32vw; height: 32vw; max-width: 420px; max-height: 420px; top: 58%; left: 70%; animation-duration: 11s; animation-delay: -2s; }
+.auth-blob-3 { width: 29vw; height: 29vw; max-width: 400px; max-height: 400px; top: 72%; left: 10%; animation-duration: 10s; animation-delay: -4.5s; }
+.auth-blob-4 { width: 33vw; height: 33vw; max-width: 460px; max-height: 460px; top: 2%;  left: 66%; animation-duration: 12s; animation-delay: -1s; }
+.auth-blob-5 { width: 25vw; height: 25vw; max-width: 350px; max-height: 350px; top: 36%; left: 42%; animation-duration: 13s; animation-delay: -6s; }
 
 @keyframes authBlobFloat {
   0%   { transform: translate3d(0,0,0) scale(1); }
-  50%  { transform: translate3d(3%, -4%, 0) scale(1.08); }
-  100% { transform: translate3d(-4%, 3%, 0) scale(0.94); }
+  50%  { transform: translate3d(6%, -8%, 0) scale(1.16); }
+  100% { transform: translate3d(-7%, 6%, 0) scale(0.88); }
 }
 
 /* ---- 5b. Split shell: hero (left) | form panel (right); stacks narrow ---- */
@@ -505,7 +737,9 @@ select.field-input { cursor: pointer; }
 .auth-hero { min-width: 0; }
 .auth-hero-inner { position: relative; padding: .5rem 0; }
 .auth-hero-brand { display: flex; align-items: center; gap: .75rem; margin-bottom: 1.75rem; }
-.auth-wordmark { font-size: 1.375rem; font-weight: 800; letter-spacing: -.02em; color: var(--text); }
+/* The self-writing "Axiom" wordmark (axiomLogoSvg('wordmark')) — a touch
+   larger than the old static text (1.375rem tall) for more display presence. */
+.auth-hero-brand .axiom-logo-wordmark { width: 9.5rem; height: auto; color: var(--text); }
 .auth-monogram-lg {
   width: 2.75rem;
   height: 2.75rem;
@@ -533,12 +767,19 @@ select.field-input { cursor: pointer; }
   color: var(--text-muted);
   overflow: hidden;
 }
-.auth-tagline-text { display: block; animation: authTaglineIn .45s var(--ease-out); }
-.auth-tagline-text.auth-tagline-exit { animation: authTaglineOut .26s var(--ease-spring) forwards; }
+.auth-tagline-text { display: block; animation: authTaglineIn .32s var(--ease-out); }
+.auth-tagline-text.auth-tagline-exit { animation: authTaglineOut .18s var(--ease-spring) forwards; }
 @keyframes authTaglineIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes authTaglineOut { to { opacity: 0; transform: translateY(-10px); } }
 
-.auth-hero-motifs { position: relative; height: 0; margin-top: 2.75rem; }
+/* min-height (not height:0) so the motifs — which float below the hero's
+   text content via absolute positioning — count toward .auth-hero-inner's
+   OWN measured height. .auth-shell centers hero/card by their measured
+   height; with height:0 the motifs overflowed past that measured box
+   uncounted, so the visible content (hero text + overflowing motifs below)
+   read as centered too LOW against the card. min-height ~ the lowest
+   motif's bottom edge (motif-3: top 6.5rem + its own ~2.3rem box) fixes it. */
+.auth-hero-motifs { position: relative; min-height: 8.8rem; margin-top: 2.75rem; }
 .auth-motif {
   position: absolute;
   display: inline-flex;
@@ -675,6 +916,11 @@ select.auth-input { cursor: pointer; }
 
 .auth-hint { display: block; margin-top: .3rem; font-size: .72rem; color: var(--text-subtle); }
 
+/* G5: inline per-field validation hint (signup: email/password/confirm),
+   appended next to .auth-hint when the field's live value is invalid. */
+.auth-field-error { display: none; margin-top: .3rem; font-size: .72rem; color: var(--danger); }
+.auth-field-error.show { display: block; }
+
 .auth-toggle-btn {
   position: absolute;
   right: .5rem;
@@ -753,7 +999,222 @@ select.auth-input { cursor: pointer; }
 .auth-success-tick { animation: authSuccessDraw .4s var(--ease-out) .42s forwards; }
 @keyframes authSuccessDraw { to { stroke-dashoffset: 0; } }
 
-/* ---------- 6. Reduced motion ---------- */
+/* ---------- 6. Dashboard drag-to-reschedule (Build 12 Further Fixes) ----------
+   Grab a lesson row (list view) or chip (calendar view) and drop it onto a
+   different day section/cell to pin it there; a small "Moved" pill + reset
+   control (see lessonRow in app.js) undoes it. Mechanics live in app.js
+   (dashDragPointerDown); this is just the ghost/drop-highlight/affordance
+   visuals, themed via the same light/dark tokens as everything else. */
+
+/* Every draggable lesson element carries this data-action (revision rows use
+   a different action, so they're excluded automatically — never draggable). */
+[data-action="open-schedule-lesson"] { cursor: grab; }
+
+/* Set on <body> for the duration of an active drag: pins the grabbing cursor
+   everywhere (not just over the row, which may lag behind a fast pointer)
+   and blocks incidental text selection while dragging. */
+.dash-dragging-active,
+.dash-dragging-active * { cursor: grabbing !important; user-select: none !important; }
+
+/* The row/chip being dragged fades in place while its ghost leads. */
+.dash-row-source-dragging { opacity: .35; }
+
+/* A floating card that follows the pointer during a drag — cloned innerHTML
+   of the source row/chip, so it looks like "the row itself" is being moved. */
+.dash-drag-ghost {
+  position: fixed;
+  z-index: 90;
+  pointer-events: none;
+  opacity: .92;
+  transform: scale(1.03) rotate(-1deg);
+  box-shadow: var(--shadow-lg);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+}
+
+/* The day section (list view) or day cell (calendar view) currently under
+   the dragged ghost. */
+[data-day-drop].drop-target-active {
+  outline: 2px dashed var(--primary);
+  outline-offset: 3px;
+  background: color-mix(in srgb, var(--primary) 9%, transparent);
+  border-radius: var(--r-lg);
+  transition: background-color .12s var(--ease-out), outline-color .12s var(--ease-out);
+}
+
+/* "Moved" pill on a lesson row that carries a manual day override. */
+.lesson-moved-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: .2rem;
+  margin-left: .4rem;
+  padding: .05rem .45rem;
+  border-radius: var(--r-pill);
+  background: var(--info-c);
+  color: var(--info);
+  font-size: .625rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+/* "Review" pill on a lesson row whose best quiz score is below the weak
+   threshold (see LESSON_WEAK_THRESHOLD in app.js) — amber, mirrors
+   .lesson-moved-pill's shape exactly but with the warning tokens. */
+.lesson-review-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: .2rem;
+  margin-left: .4rem;
+  padding: .05rem .45rem;
+  border-radius: var(--r-pill);
+  background: var(--warning-c);
+  color: var(--warning);
+  font-size: .625rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+/* F5: a done-but-still-weak lesson keeps the review cue instead of losing it
+   outright — muted so it reads as a subdued note, not an active call to action. */
+.lesson-review-pill-done {
+  opacity: .55;
+}
+
+/* Reset-to-automatic control on a moved lesson row. */
+.lesson-reset-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  border-radius: var(--r-pill);
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease-spring), color var(--dur) var(--ease-spring);
+}
+.lesson-reset-btn:hover { background: var(--surface-2); color: var(--primary); }
+.lesson-reset-btn:active { transform: scale(.95); }
+
+/* Tiny "moved" dot on a calendar chip (no room for a full pill there). */
+.calendar-chip-moved-dot {
+  display: inline-block;
+  width: .3rem;
+  height: .3rem;
+  border-radius: 50%;
+  background: var(--info);
+  flex-shrink: 0;
+}
+
+/* ---------- 7. Global search command palette (Build 13c) ----------
+   Ctrl/Cmd+K (or the sidebar's Search rail icon) opens a body-mounted
+   overlay over /mindmap/graph's already-loaded curriculum (courses +
+   concepts) — no new backend endpoint. Layering: same tier as other
+   dialogs (z-[75], between the pomodoro tray 60/auth gate 70 and toasts
+   80 — see ui.js's mountOverlay comment), just with its own wider panel
+   instead of .modal-card's max-w-md. */
+.search-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 75;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 4rem 1rem 1rem;
+  background: rgba(20, 16, 25, .45);
+  backdrop-filter: blur(2px);
+}
+.search-palette {
+  width: 100%;
+  max-width: 34rem;
+  max-height: min(28rem, 80vh);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-lg);
+  animation: rise var(--dur) var(--ease-out);
+}
+.search-palette-input-row {
+  display: flex;
+  align-items: center;
+  gap: .625rem;
+  padding: .875rem 1rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.search-palette-input-row svg { flex-shrink: 0; color: var(--text-subtle); }
+.search-palette-input {
+  border: none !important;
+  background: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  font-size: 1rem !important;
+  box-shadow: none !important;
+}
+.search-palette-input:focus { outline: none; box-shadow: none !important; }
+.search-palette-results {
+  overflow-y: auto;
+  padding: .5rem;
+}
+.search-palette-group-label {
+  padding: .5rem .625rem .25rem;
+  font-size: .7rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}
+.search-palette-row {
+  display: flex;
+  align-items: center;
+  gap: .625rem;
+  padding: .55rem .625rem;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) ease;
+}
+.search-palette-row:hover,
+.search-palette-row.search-palette-row-selected {
+  background: var(--primary-container);
+}
+.search-palette-row-text { min-width: 0; flex: 1; }
+.search-palette-row-title {
+  font-size: .875rem;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.search-palette-row-subtitle {
+  margin-top: .1rem;
+  font-size: .75rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.search-palette-row-badge { flex-shrink: 0; }
+.search-palette-empty {
+  padding: 2rem 1rem;
+  text-align: center;
+  font-size: .875rem;
+  color: var(--text-subtle);
+}
+.search-palette-hint {
+  padding: .3rem .625rem .6rem;
+  font-size: .75rem;
+  color: var(--text-subtle);
+}
+
+/* ---------- 8. Reduced motion ---------- */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation: none !important;

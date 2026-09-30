@@ -1,0 +1,489 @@
+/* Axiom Question Analysis (Build 12, Phases 2 + 4 — frontend). `.qa-*` classes
+   ONLY — a hand-rolled SVG/CSS viz (no chart library) over a course's PYQ
+   AnalysisResult (question-type distribution donut, topic-importance bars,
+   pattern cards, expandable representative questions, a rich-text summary),
+   plus (Phase 4) the "Prepare revision PDF" per-exam control and the
+   dashboard/calendar synthetic revision row/chip styling. Everything reads
+   theme.css custom properties so light/dark both work with no duplication;
+   no backdrop-filter. See frontend/ANALYSIS.md §6-7. */
+
+/* ---------- shared: tiny spinner (generating states) ---------- */
+.qa-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--text-muted);
+  animation: qaSpin .7s linear infinite;
+}
+.qa-spinner-lg {
+  width: 28px;
+  height: 28px;
+  border-width: 3px;
+  border-top-color: var(--primary);
+}
+@keyframes qaSpin { to { transform: rotate(360deg); } }
+
+/* ---------- section stack (course view) ---------- */
+.qa-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+}
+.qa-section { animation: rise var(--dur-slow) var(--ease-out) both; }
+/* The viz sections (question types, topic ranking, patterns, samples, summary)
+   live inside #qa-viz-body — space them out so they don't read as one packed
+   block (the .qa-sections gap only separates the exam bar from this body). */
+#qa-viz-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2.5rem;
+}
+
+.qa-generating .qa-spinner-lg { margin-bottom: .25rem; }
+
+/* ---------- prominent status chip (readiness pills) ---------- */
+.qa-status-pill {
+  font-weight: 700;
+  padding: .2rem .65rem .2rem .5rem;
+}
+.qa-status-dot {
+  width: .42rem;
+  height: .42rem;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+/* ---------- analysis-view hero header ---------- */
+.qa-hero { overflow: hidden; }
+.qa-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .6rem;
+}
+.qa-stat-chip {
+  display: flex;
+  align-items: baseline;
+  gap: .35rem;
+  padding: .45rem .85rem;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.qa-stat-value {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.qa-stat-label {
+  font-size: .7rem;
+  font-weight: 600;
+  color: var(--text-subtle);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+/* ---------- empty / pending / failed state cards ---------- */
+.qa-state-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 999px;
+  font-size: 1.4rem;
+  line-height: 1;
+  background: var(--surface-2);
+  color: var(--text-subtle);
+}
+
+/* Shared small circular badge for a section-header glyph (summary sparkle,
+   revision doc icon) — color/background set inline per section. */
+.qa-icon-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: var(--r-md);
+  flex-shrink: 0;
+}
+
+/* ---------- per-exam topic filter bar ---------- */
+.qa-exam-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .4rem;
+  padding: .4rem;
+  border-radius: var(--r-lg);
+  background: var(--surface-2);
+  overflow-x: auto;
+}
+.qa-exam-btn {
+  border: none;
+  cursor: pointer;
+  font-size: .8rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: transform var(--dur) var(--ease-spring), box-shadow var(--dur) var(--ease-spring),
+              background-color var(--dur) var(--ease-spring), color var(--dur) var(--ease-spring);
+}
+.qa-exam-btn:hover { transform: translateY(-1px); }
+.qa-exam-btn-active { box-shadow: var(--shadow-sm); }
+.qa-exam-caption {
+  font-size: .8rem;
+  color: var(--text-subtle);
+  padding: 0 .1rem;
+}
+
+/* ---------- question-type distribution: donut + legend ---------- */
+.qa-types-layout {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  flex-wrap: wrap;
+}
+.qa-donut-wrap { flex-shrink: 0; }
+.qa-donut {
+  width: 160px;
+  height: 160px;
+  display: block;
+  filter: drop-shadow(0 3px 8px rgba(0,0,0,.12));
+}
+.qa-donut circle { transition: stroke-width var(--dur) var(--ease-spring); }
+.qa-donut-total {
+  font: 800 28px/1 Inter, ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -.01em;
+  fill: var(--text);
+}
+.qa-donut-total-label {
+  font: 600 10px/1 Inter, ui-sans-serif, system-ui, sans-serif;
+  fill: var(--text-subtle);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+.qa-legend {
+  flex: 1 1 220px;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: .65rem;
+}
+.qa-legend-item {
+  min-width: 0;
+  padding: .55rem .75rem;
+  border-radius: var(--r-md);
+  transition: transform var(--dur) var(--ease-spring);
+}
+.qa-legend-item:hover { transform: translateX(3px); }
+.qa-legend-row {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+}
+.qa-legend-dot {
+  width: .6rem;
+  height: .6rem;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.qa-legend-label {
+  font-size: .875rem;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qa-legend-count {
+  margin-left: auto;
+  font-size: .8rem;
+  color: var(--text-subtle);
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding-left: .5rem;
+}
+.qa-legend-note {
+  margin: .2rem 0 0 1.15rem;
+  font-size: .78rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+/* ---------- topic-importance ranking ---------- */
+.qa-topics {
+  display: flex;
+  flex-direction: column;
+  gap: .9rem;
+}
+.qa-topic-row {
+  display: flex;
+  align-items: flex-start;
+  gap: .85rem;
+}
+.qa-topic-rank {
+  flex-shrink: 0;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: .78rem;
+  font-weight: 700;
+  background: var(--surface-2);
+  color: var(--text-subtle);
+  margin-top: .05rem;
+  transition: box-shadow var(--dur-slow) var(--ease-spring);
+}
+.qa-topic-row-top .qa-topic-name { font-weight: 700; }
+.qa-topic-main { flex: 1; min-width: 0; }
+.qa-topic-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: .45rem;
+  margin-bottom: .35rem;
+}
+.qa-topic-name {
+  font-size: .9rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.qa-topic-concept {
+  font-size: .75rem;
+  color: var(--text-subtle);
+  background: var(--surface-2);
+  padding: .05rem .45rem;
+  border-radius: var(--r-sm);
+}
+.qa-topic-freq {
+  margin-left: auto;
+  font-size: .75rem;
+  font-weight: 600;
+  color: var(--text-subtle);
+  white-space: nowrap;
+}
+.qa-bar-track {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.qa-bar-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  transition: width .7s var(--ease-out);
+}
+.qa-topic-rationale {
+  margin-top: .4rem;
+  font-size: .8rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+.qa-topic-score {
+  flex-shrink: 0;
+  width: 2rem;
+  text-align: right;
+  font-size: .9rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-top: .05rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- patterns & insights ---------- */
+.qa-patterns {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: .6rem;
+}
+@media (min-width: 640px) {
+  .qa-patterns { grid-template-columns: 1fr 1fr; }
+}
+.qa-pattern-card {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: .8rem .95rem;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  transition: transform var(--dur) var(--ease-spring), box-shadow var(--dur) var(--ease-spring);
+}
+.qa-pattern-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+.qa-pattern-icon {
+  flex-shrink: 0;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.qa-pattern-text {
+  font-size: .84rem;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+/* ---------- representative questions ---------- */
+.qa-samples {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+.qa-details {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.qa-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: .7rem 1rem;
+  cursor: pointer;
+  font-size: .875rem;
+  font-weight: 600;
+  color: var(--text);
+  list-style: none;
+  transition: background-color var(--dur) var(--ease-spring);
+}
+.qa-details summary::-webkit-details-marker { display: none; }
+.qa-details summary::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  margin-right: .3rem;
+  border-right: 2px solid var(--text-subtle);
+  border-bottom: 2px solid var(--text-subtle);
+  transform: rotate(-45deg);
+  transition: transform var(--dur) var(--ease-spring);
+  flex-shrink: 0;
+}
+.qa-details[open] summary::before { transform: rotate(45deg); }
+.qa-details summary:hover { background: var(--surface-2); }
+.qa-details-lead {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  min-width: 0;
+  flex: 1;
+}
+.qa-details-name { min-width: 0; }
+.qa-details-count {
+  flex-shrink: 0;
+  font-size: .75rem;
+  font-weight: 600;
+  color: var(--text-subtle);
+}
+.qa-details-body {
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+  padding: 0 1rem 1rem;
+}
+.qa-sample-q {
+  display: flex;
+  align-items: flex-start;
+  gap: .65rem;
+  padding: .65rem .85rem;
+  border-left: 3px solid var(--primary-container);
+  background: var(--surface-2);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  font-size: .83rem;
+  line-height: 1.55;
+  color: var(--text);
+}
+.qa-sample-q-idx {
+  flex-shrink: 0;
+  font-size: .72rem;
+  font-weight: 700;
+  color: var(--text-subtle);
+  margin-top: .15rem;
+}
+
+/* ---------- summary card (gentle accent wash — reads as an AI-crafted
+   takeaway rather than a plain text block) ---------- */
+.qa-summary-card {
+  background: linear-gradient(160deg, color-mix(in srgb, var(--primary) 5%, var(--surface)), var(--surface));
+}
+.qa-summary-card .qa-icon-badge {
+  background: var(--primary-container);
+  color: var(--primary);
+}
+
+/* ---------- revision PDF per exam (Build 12, Phase 4) ----------
+   Same lilac-dashed + doc-glyph identity as the dashboard's synthetic
+   revision row (app.js revisionRow, ~262) so "revision" reads as one
+   consistent concept across the app. */
+/* The Revision PDF section is a sibling of #qa-viz (not a child of
+   #qa-viz-body, whose gap only spaces its own children), so it needs its own
+   top margin to stay off the Summary card above it -- matches the
+   #qa-viz-body inter-card rhythm. */
+.qa-revision-section { margin-top: 2.5rem; }
+.qa-revisions {
+  display: flex;
+  flex-direction: column;
+  gap: .65rem;
+}
+.qa-revision-item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .85rem;
+  padding: .8rem 1rem;
+  border-radius: var(--r-md);
+  background: var(--surface);
+  border: 1px dashed color-mix(in srgb, var(--lilac) 45%, transparent);
+  border-left: 4px solid color-mix(in srgb, var(--lilac) 70%, var(--surface));
+  transition: transform var(--dur) var(--ease-spring), box-shadow var(--dur) var(--ease-spring);
+  animation: rise var(--dur-slow) var(--ease-out) both;
+}
+.qa-revision-item:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+.qa-revision-icon { display: inline-flex; align-items: center; }
+.qa-revision-item-name {
+  font-size: .875rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.qa-revision-item-date {
+  margin-top: .1rem;
+  font-size: .78rem;
+  color: var(--text-subtle);
+}
+
+/* Fixed-width status/button columns (Build 14 FF) so the ragged pill+button
+   cluster on the right of each revision row lines up into clean columns
+   regardless of exam-name length or pill text width. */
+.qa-rev-status {
+  min-width: 8.5rem;
+  display: inline-flex;
+  justify-content: flex-end;
+}
+.qa-rev-btn {
+  min-width: 11.5rem;
+}
+
+/* dashboard/calendar synthetic revision row + chip (app.js revisionRow /
+   revisionChip) — same rise-in entrance as lessonRow/courseCard; the dashed
+   lilac border + doc glyph (set inline via accent tokens) is what makes it
+   read as "revision", not a normal lesson row. */
+.qa-revision-row:hover { filter: brightness(1.02); }
+
+/* ---------- reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .qa-spinner, .qa-spinner-lg { animation: none !important; }
+  .qa-bar-fill { transition: none !important; }
+  .qa-section { animation: none !important; }
+  .qa-details summary::before { transition: none !important; }
+  .qa-revision-item { animation: none !important; }
+  .qa-exam-btn { transition: none !important; }
+}
