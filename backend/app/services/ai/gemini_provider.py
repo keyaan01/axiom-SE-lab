@@ -18,6 +18,8 @@ from .base import (
     Attachment,
     ConceptOut,
     QuizQuestion,
+    ConceptLink,
+    AnalysisResult,
     AICancelled,
     NOTE_MAX_TOKENS,
     _RETRYABLE,
@@ -26,6 +28,10 @@ from .base import (
     extra_instructions_block,
     quiz_prompt_text,
     repair_prompt_text,
+    links_prompt_text,
+    analysis_prompt_text,
+    revision_topics_block,
+    revision_prompt_text,
     parse_data_url,
 )
 
@@ -463,6 +469,90 @@ class GeminiProvider(AIProvider):
         if not data:
             raise RuntimeError("Gemini returned an empty quiz.")
         return list(data)
+
+    def discover_links(self, concept_lines: str, should_cancel=None) -> list[ConceptLink]:
+        """Ask Gemini to find related concept pairs across the whole curriculum
+        (Build 10 — "Constellation" mind map). Text-only, no attachments; an
+        empty list is a VALID result (a curriculum can have no strong links).
+        """
+        prompt = links_prompt_text(concept_lines)
+        resp = generate_with_retry(
+            [prompt],
+            types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=list[ConceptLink],
+                temperature=0.2,
+            ),
+            should_cancel=should_cancel,
+        )
+        data = resp.parsed
+        if not data:
+            raw = (resp.text or "").strip()
+            data = [ConceptLink(**d) for d in json.loads(raw)] if raw else []
+        return list(data)
+
+    def analyze_questions(self, pyqs: list[Attachment], concepts: list[dict],
+                           should_cancel=None) -> AnalysisResult:
+        """Ask Gemini to analyze a course's past exam questions ONLY (Build 12 —
+        Question Analysis). pyqs are the course's PYQ Attachments (the router/
+        service guarantee at least one before calling this); concepts (may be
+        empty) is the course's known concept list, mapped into the prompt by
+        analysis_prompt_text. Structured output (response_schema=AnalysisResult,
+        a single object, unlike the list[...] schemas the other structured
+        calls use).
+        """
+        contents = ["PAST EXAM QUESTIONS — analyze ONLY these attached files:"]
+        for att in pyqs:
+            contents += [f"PAST EXAM FILE — {att.display_name}:", _ensure_uploaded(att)]
+        contents.append(analysis_prompt_text(concepts))
+        resp = generate_with_retry(
+            contents,
+            types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=AnalysisResult,
+                temperature=0.2,
+                max_output_tokens=NOTE_MAX_TOKENS,
+            ),
+            should_cancel=should_cancel,
+        )
+        data = resp.parsed
+        if not data:
+            raw = (resp.text or "").strip()
+            if not raw:
+                raise RuntimeError("Gemini returned an empty analysis.")
+            data = AnalysisResult(**json.loads(raw))
+        return data
+
+    def generate_revision_latex(self, exam_name: str, ranked_topics: list[dict],
+                                 materials: list[Attachment], pyqs: list[Attachment],
+                                 concepts: list[dict], should_cancel=None) -> str:
+        """Generate the LaTeX body of an exam revision document (Build 12 —
+        Question Analysis, Phase 3). Mirrors generate_note_latex: materials
+        are the ONLY source of teaching content, pyqs are cited/reproduced in
+        the practice blocks, streamed the same way for long-output safety.
+        """
+        topics_block = revision_topics_block(ranked_topics)
+        concepts_list = ", ".join(c.get("name", "") for c in concepts) if concepts else "none"
+        prompt = revision_prompt_text(exam_name, topics_block, concepts_list)
+        contents = ["STUDY MATERIALS — the ONLY source of teaching content for this revision:"]
+        contents += [_ensure_uploaded(att) for att in materials]
+        if pyqs:
+            contents += ["PAST EXAM QUESTIONS (reproduce the real, highest-value questions and cite them):"]
+            for att in pyqs:
+                contents += [f"PAST EXAM FILE — {att.display_name}:", _ensure_uploaded(att)]
+        contents += [prompt]
+        resp = generate_with_retry(
+            contents,
+            types.GenerateContentConfig(temperature=0.3, max_output_tokens=NOTE_MAX_TOKENS),
+            should_cancel=should_cancel,
+            stream=True,
+        )
+        text = (resp.text or "").strip()
+        if _finish_reason(resp) == "MAX_TOKENS":
+            raise RuntimeError("Revision output was truncated (too long). Try regenerating.")
+        if not text:
+            raise RuntimeError("Gemini returned an empty revision.")
+        return text
 
     def stream_answer(self, system: str, user: str, image: str | None = None, should_cancel=None):
         """Stream a study-assistant answer (Phase A of the "ask AI" feature).

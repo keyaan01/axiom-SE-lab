@@ -13,23 +13,30 @@ from .base import (
     Attachment,
     ConceptOut,
     QuizQuestion,
+    ConceptLink,
+    AnalysisResult,
     AICancelled,
     concept_prompt_text,
     note_prompt_text,
     extra_instructions_block,
     quiz_prompt_text,
     repair_prompt_text,
+    links_prompt_text,
+    analysis_prompt_text,
+    revision_topics_block,
+    revision_prompt_text,
     read_bytes,
     is_pdf,
     is_image,
     parse_json_list,
+    parse_json_object,
     parse_data_url,
     retry_call,
 )
 
 # max_tokens is REQUIRED by the Messages API (no server-side default cap).
 _NOTE_MAX_TOKENS = 8192
-_STRUCTURED_MAX_TOKENS = 4096
+_STRUCTURED_MAX_TOKENS = 8192
 
 
 class AnthropicProvider(AIProvider):
@@ -120,6 +127,32 @@ class AnthropicProvider(AIProvider):
             text2 = _ask(retry_content)
             return parse_json_list(text2, model)  # let this raise if still unparseable
 
+    def _ask_json_object(self, content: list, model, should_cancel=None,
+                          max_tokens: int = _STRUCTURED_MAX_TOKENS):
+        """One JSON-object structured call (the single-object counterpart to
+        _ask_json_list, used for AnalysisResult), with ONE forceful re-ask if
+        the response can't be parsed.
+        """
+        def _ask(c):
+            def _call():
+                return self._client_obj().messages.create(
+                    model=self._model(),
+                    max_tokens=max_tokens,
+                    messages=[{"role": "user", "content": c}],
+                )
+            resp = retry_call(_call, should_cancel=should_cancel)
+            return "".join(getattr(b, "text", "") for b in resp.content)
+
+        text = _ask(content)
+        try:
+            return parse_json_object(text, model)
+        except Exception:
+            retry_content = content + [
+                {"type": "text", "text": "Return ONLY the JSON object, no prose."},
+            ]
+            text2 = _ask(retry_content)
+            return parse_json_object(text2, model)  # let this raise if still unparseable
+
     def extract_concepts(self, materials: list, should_cancel=None) -> list:
         prompt = concept_prompt_text()
         content = self._build_content(prompt, materials, [])
@@ -134,6 +167,23 @@ class AnthropicProvider(AIProvider):
         if not data:
             raise RuntimeError("Model returned an empty quiz.")
         return data
+
+    def discover_links(self, concept_lines: str, should_cancel=None) -> list:
+        """Find related concept pairs across the whole curriculum (Build 10).
+        Text-only, no attachments; an empty list is a VALID result.
+        """
+        prompt = links_prompt_text(concept_lines)
+        content = self._build_content(prompt, [], [])
+        return self._ask_json_list(content, ConceptLink, should_cancel=should_cancel)
+
+    def analyze_questions(self, pyqs: list, concepts: list,
+                           should_cancel=None) -> AnalysisResult:
+        """Analyze a course's past exam questions ONLY (Build 12 — Question
+        Analysis). materials=[] — this call never sees study materials.
+        """
+        prompt = analysis_prompt_text(concepts)
+        content = self._build_content(prompt, [], pyqs)
+        return self._ask_json_object(content, AnalysisResult, should_cancel=should_cancel)
 
     # -- streaming text calls (notes / repair) ---------------------------------
 
@@ -194,6 +244,14 @@ class AnthropicProvider(AIProvider):
     def repair_note_latex(self, name: str, broken_body: str, error: str, should_cancel=None) -> str:
         prompt = repair_prompt_text(name, error, broken_body)
         content = [{"type": "text", "text": prompt}]
+        return self._stream_text(content, should_cancel=should_cancel)
+
+    def generate_revision_latex(self, exam_name: str, ranked_topics: list, materials: list, pyqs: list,
+                                 concepts: list, should_cancel=None) -> str:
+        topics_block = revision_topics_block(ranked_topics)
+        concepts_list = ", ".join(c.get("name", "") for c in concepts) if concepts else "none"
+        prompt = revision_prompt_text(exam_name, topics_block, concepts_list)
+        content = self._build_content(prompt, materials, pyqs)
         return self._stream_text(content, should_cancel=should_cancel)
 
     def stream_answer(self, system: str, user: str, image: str | None = None, should_cancel=None):
