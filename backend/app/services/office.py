@@ -8,6 +8,7 @@ Tectonic) — not a pip dependency; document install separately.
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from .. import config
 
@@ -21,29 +22,42 @@ def convert_to_pdf(src_path: Path, out_dir: Path, timeout: int = 180) -> Path:
 
     LibreOffice names the output '<src stem>.pdf' inside out_dir. Returns the
     resulting Path. Raises OfficeError with a clear message on any failure.
+
+    Each call runs with its OWN throwaway user profile via
+    `-env:UserInstallation=<unique temp dir>`: LibreOffice single-instances on a
+    shared profile lock, so two conversions firing at once (e.g. dropping a docx
+    and a pptx together on the canvas, or two material uploads) would otherwise
+    race and the second would fail with a profile-lock "unknown error". A private
+    profile per run removes that contention. The temp profile is cleaned up after.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
+    profile_dir = Path(tempfile.mkdtemp(prefix="axiom_soffice_"))
     try:
-        proc = subprocess.run(
-            [config.SOFFICE_PATH, "--headless", "--convert-to", "pdf",
-             "--outdir", str(out_dir), str(src_path)],
-            capture_output=True, text=True, timeout=timeout,
-        )
-    except FileNotFoundError:
-        raise OfficeError(
-            f"LibreOffice ('{config.SOFFICE_PATH}') is not installed or not on PATH."
-        )
-    except subprocess.TimeoutExpired:
-        raise OfficeError(f"LibreOffice conversion timed out after {timeout}s.")
+        try:
+            proc = subprocess.run(
+                [config.SOFFICE_PATH,
+                 f"-env:UserInstallation={profile_dir.as_uri()}",
+                 "--headless", "--convert-to", "pdf",
+                 "--outdir", str(out_dir), str(src_path)],
+                capture_output=True, text=True, timeout=timeout,
+            )
+        except FileNotFoundError:
+            raise OfficeError(
+                f"LibreOffice ('{config.SOFFICE_PATH}') is not installed or not on PATH."
+            )
+        except subprocess.TimeoutExpired:
+            raise OfficeError(f"LibreOffice conversion timed out after {timeout}s.")
 
-    if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout or "").strip()
-        raise OfficeError(f"LibreOffice conversion failed: {detail or 'unknown error'}")
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or "").strip()
+            raise OfficeError(f"LibreOffice conversion failed: {detail or 'unknown error'}")
 
-    out_pdf = out_dir / (src_path.stem + ".pdf")
-    if not out_pdf.exists():
-        raise OfficeError("LibreOffice reported success but produced no PDF.")
-    return out_pdf
+        out_pdf = out_dir / (src_path.stem + ".pdf")
+        if not out_pdf.exists():
+            raise OfficeError("LibreOffice reported success but produced no PDF.")
+        return out_pdf
+    finally:
+        shutil.rmtree(profile_dir, ignore_errors=True)
 
 
 def office_available() -> tuple:

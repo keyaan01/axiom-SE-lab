@@ -27,6 +27,8 @@ THUMBS_DIR = DATA_DIR / "thumbs"     # page-1 preview PNGs, per course
 WORK_DIR = DATA_DIR / "work"         # transient LaTeX build dirs
 AVATARS_DIR = DATA_DIR / "avatars"   # user profile avatar images (Build 5, Step 5)
 CANVAS_DIR = DATA_DIR / "canvas"     # dropped canvas files (images/pdf/docx/pptx), per concept
+REVISIONS_DIR = DATA_DIR / "revisions"  # compiled per-exam revision PDFs + thumbs, per course
+REVISION_CANVAS_DIR = DATA_DIR / "revision_canvas"  # dropped per-revision canvas files, per revision
 
 # Secrets / external tools.
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
@@ -51,5 +53,5 @@ OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "").strip()
 
 def ensure_dirs() -> None:
     """Create the data directory tree if it does not exist yet."""
-    for d in (DATA_DIR, UPLOADS_DIR, NOTES_DIR, THUMBS_DIR, WORK_DIR, AVATARS_DIR, CANVAS_DIR):
+    for d in (DATA_DIR, UPLOADS_DIR, NOTES_DIR, THUMBS_DIR, WORK_DIR, AVATARS_DIR, CANVAS_DIR, REVISIONS_DIR, REVISION_CANVAS_DIR):
         d.mkdir(parents=True, exist_ok=True)

@@ -1,0 +1,5 @@
+# Dev/test-only dependencies (not needed to run Axiom).
+# Install into the venv:  backend/.venv/Scripts/python.exe -m pip install -r backend/requirements-dev.txt
+# Run the tests:          backend/.venv/Scripts/python.exe -m pytest backend/tests -v
+pytest==9.1.1
+httpx==0.28.1

@@ -2,12 +2,13 @@
 import io
 import json
 import re
+import shutil
 import threading
 import zipfile
 from fastapi import APIRouter, Body, HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 from pydantic import BaseModel
-from .. import db
+from .. import config, db
 from ..services import generation_service, storage
 
 router = APIRouter()
@@ -117,8 +118,10 @@ def list_concepts(course_id: int):
     conn = db.get_connection()
     try:
         rows = conn.execute(
-            "SELECT id, course_id, name, summary, source_locations, material_id, order_index "
-            "FROM concepts WHERE course_id = ? ORDER BY order_index ASC, id ASC",
+            "SELECT c.id, c.course_id, c.name, c.summary, c.source_locations, c.material_id, "
+            "c.order_index, m.display_name AS source_file "
+            "FROM concepts c LEFT JOIN materials m ON m.id = c.material_id "
+            "WHERE c.course_id = ? ORDER BY c.order_index ASC, c.id ASC",
             (course_id,),
         ).fetchall()
         return [dict(r) for r in rows]
@@ -148,6 +151,49 @@ def rename_concept(concept_id: int, payload: ConceptRenameIn):
         return {"id": concept_id, "name": name, "display_name": name}
     finally:
         conn.close()
+
+
+@router.delete("/concepts/{concept_id}")
+def delete_concept(concept_id: int):
+    """Delete a lesson/concept and everything scoped to it.
+
+    Most child rows cascade away via FK ON DELETE CASCADE when the concepts
+    row is deleted (quizzes, lesson_progress, quiz_attempts, exam_concepts,
+    concept_links, canvas_layout, canvas_files [and, one level further, that
+    file's own canvas_file_annotations row], schedule_items,
+    schedule_overrides — see db.py SCHEMA_SQL). The one exception is
+    notes.concept_id, which is ON DELETE SET NULL (not CASCADE) — so the
+    note row (and, via ITS OWN cascade, note_annotations) is deleted
+    explicitly here first, after cleaning its pdf/thumb off disk with the
+    same helper note retry/regenerate use. Canvas files also cascade in the
+    DB, but their on-disk bytes don't, so the concept's whole canvas
+    directory is removed too. Never 500s on a missing file.
+    """
+    conn = db.get_connection()
+    try:
+        if not conn.execute("SELECT 1 FROM concepts WHERE id = ?", (concept_id,)).fetchone():
+            raise HTTPException(status_code=404, detail="Concept not found")
+        note_row = conn.execute(
+            "SELECT id, course_id, pdf_disk_uuid, thumb_disk_uuid FROM notes WHERE concept_id = ?",
+            (concept_id,),
+        ).fetchone()
+        if note_row:
+            try:
+                generation_service._remove_note_files(note_row["course_id"], note_row)
+            except Exception:
+                pass
+            conn.execute("DELETE FROM notes WHERE id = ?", (note_row["id"],))
+        conn.execute("DELETE FROM concepts WHERE id = ?", (concept_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    try:
+        canvas_dir = config.CANVAS_DIR / str(concept_id)
+        if canvas_dir.exists():
+            shutil.rmtree(canvas_dir, ignore_errors=True)
+    except Exception:
+        pass
+    return {"ok": True}
 
 
 # ---------- note PDF generation (step 4/5) ----------
@@ -323,14 +369,24 @@ def retry_note(note_id: int):
             "UPDATE notes SET status = 'generating', error_message = NULL WHERE id = ?",
             (note_id,),
         )
+        # Create a tiny 1-note job so the study area's progress card + Cancel
+        # button show up (the poll UI keys off GET /courses/:id/job), and the
+        # existing cooperative-cancel path (/job/cancel -> cancel_requested ->
+        # _is_cancelled) can actually stop the retry.
+        cur = conn.execute(
+            "INSERT INTO jobs (course_id, type, status, message, total, progress) "
+            "VALUES (?, 'generate', 'running', 'Retrying 1 note…', 1, 0)",
+            (row["course_id"],),
+        )
+        job_id = cur.lastrowid
         conn.commit()
     finally:
         conn.close()
 
     threading.Thread(
-        target=generation_service.run_note_retry, args=(note_id,), daemon=True
+        target=generation_service.run_note_retry, args=(note_id, job_id), daemon=True
     ).start()
-    return {"status": "generating"}
+    return {"status": "generating", "job_id": job_id}
 
 
 @router.get("/notes/{note_id}/latex", response_class=PlainTextResponse)

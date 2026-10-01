@@ -22,7 +22,10 @@ Algorithm, per exam (nearest exam_date first):
   - The cap is enforced per (course_id, day) ACROSS all of that course's
     exams being scheduled together — a concept ticked in two exams is
     scheduled once per exam (spaced review), and both placements count
-    against the same course/day bucket.
+    against the same course/day bucket. A concept is never placed on the
+    SAME day twice, though: if its ideal day already holds this concept (from
+    another exam), it moves to the nearest day that doesn't, so the two
+    reviews land on different days.
   - Everything is processed in stable, deterministic order (exams sorted by
     exam_date then id; concepts sorted by order_index then id; fixed offset
     search order), so calling this twice with the same `today` yields
@@ -32,6 +35,7 @@ from datetime import date, timedelta
 from .. import db
 
 CAP = 2  # max concepts per (course_id, study_date)
+WEAK_THRESHOLD = 0.6  # best_score/best_total below this -> scheduled earlier (weak-first)
 
 
 def _outward(n: int):
@@ -64,6 +68,23 @@ def build_schedule(semester_id: int, today: date | None = None, cap: int = CAP,
     6=Sun) to exclude from the study window; if excluding them would leave no
     candidate day at all for an exam, the exclusion is dropped for that exam
     (falls back to the unfiltered range) so a plan is always produced.
+
+    Override-aware: a concept with a row in `schedule_overrides` (a manual
+    drag-to-a-different-day move, keyed by the stable (exam_id, concept_id)
+    pair) is pinned to that date — clamped into [today, exam_date-1] — instead
+    of being placed by the outward-search algorithm, so a manual move survives
+    the next automatic regenerate (schedule.py deletes+reinserts all
+    schedule_items every time). The function remains pure and deterministic
+    for a fixed override set.
+
+    Weak-first (quiz-adaptive): within each exam's remaining (undone) concept
+    list, concepts whose `lesson_progress.best_score/best_total` is below
+    WEAK_THRESHOLD are stably moved ahead of the rest (order within each group
+    is otherwise unchanged — still order_index/id order), so they land on
+    earlier "ideal" days in the even spread. This never bypasses the
+    per-course/day cap (unlike a manual override) — it only changes ranking
+    among concepts competing for the same window, keeping the function pure
+    and deterministic for a fixed lesson_progress snapshot.
     """
     today = today or date.today()
     skip = skip_weekdays or set()
@@ -112,10 +133,39 @@ def build_schedule(semester_id: int, today: date | None = None, cap: int = CAP,
                 (semester_id,),
             ).fetchall()
         }
+
+        # Quiz-adaptive: concepts with a below-threshold best quiz score (and
+        # not yet done) are scheduled earlier within their exam group.
+        weak_ids = {
+            r["concept_id"] for r in conn.execute(
+                "SELECT lp.concept_id FROM lesson_progress lp "
+                "JOIN concepts c ON c.id = lp.concept_id "
+                "JOIN courses co ON co.id = c.course_id "
+                "WHERE co.semester_id = ? AND lp.done = 0 "
+                "AND lp.best_total > 0 AND (lp.best_score * 1.0 / lp.best_total) < ?",
+                (semester_id, WEAK_THRESHOLD),
+            ).fetchall()
+        }
+
+        # Manual moves (drag-to-a-different-day on the dashboard) — keyed by
+        # the stable (exam_id, concept_id) pair since schedule_items.id is
+        # ephemeral (recreated on every regenerate). See schedule_overrides in
+        # db.py.
+        overrides = {
+            (r["exam_id"], r["concept_id"]): r["study_date"]
+            for r in conn.execute(
+                "SELECT exam_id, concept_id, study_date FROM schedule_overrides "
+                "WHERE semester_id = ?",
+                (semester_id,),
+            ).fetchall()
+        }
     finally:
         conn.close()
 
     load: dict[tuple[int, str], int] = {}  # (course_id, 'YYYY-MM-DD') -> count
+    # Same-concept/same-day guard: a concept ticked in >=2 exams is scheduled
+    # once per exam (spaced review), but must never land on the SAME day twice.
+    placed_concept_days: set[tuple[int, str]] = set()  # (concept_id, 'YYYY-MM-DD')
     items: list[dict] = []
 
     for exam in exams:
@@ -124,6 +174,10 @@ def build_schedule(semester_id: int, today: date | None = None, cap: int = CAP,
         cids = [c for c in exam["concept_ids"] if c not in done_ids]
         if not cids:
             continue
+        # Weak-first, stable: preserves the existing order_index/id order
+        # within each group (weak, then the rest), so a weak concept gets an
+        # earlier "ideal" day in the even spread below.
+        cids = sorted(cids, key=lambda c: 0 if c in weak_ids else 1)
 
         start = max(date.fromisoformat(exam["study_start_date"]), today)
         end = date.fromisoformat(exam["exam_date"]) - timedelta(days=1)  # study BEFORE the exam
@@ -143,20 +197,69 @@ def build_schedule(semester_id: int, today: date | None = None, cap: int = CAP,
         n = len(window)
 
         for ci, concept_id in enumerate(cids):
+            ov = overrides.get((exam["id"], concept_id))
+            if ov:
+                # Manually pinned: honor the override date instead of the
+                # outward-search placement, clamped to [today, exam_date-1] so
+                # a moved lesson always stays before its exam. Bypasses the
+                # per-course/day cap (a manual move may legitimately exceed
+                # it) but still counts toward `load` so non-pinned siblings
+                # spread around it.
+                try:
+                    ovd = date.fromisoformat(ov)
+                except ValueError:
+                    ovd = None
+                if ovd is not None:
+                    latest = date.fromisoformat(exam["exam_date"]) - timedelta(days=1)
+                    if latest < today:
+                        latest = today
+                    pinned = min(max(ovd, today), latest)
+                    d = pinned.isoformat()
+                    load[(exam["course_id"], d)] = load.get((exam["course_id"], d), 0) + 1
+                    placed_concept_days.add((concept_id, d))
+                    items.append({
+                        "semester_id": semester_id,
+                        "course_id": exam["course_id"],
+                        "exam_id": exam["id"],
+                        "concept_id": concept_id,
+                        "study_date": d,
+                        "order_index": ci,
+                    })
+                    continue
+
             ideal = (ci * n) // max(1, len(cids))  # spread across the whole window
             if ideal >= n:
                 ideal = n - 1
-            # search outward from `ideal` for a day with load < cap; deterministic
-            # offset order 0, +1, -1, +2, -2, ...; falls back to `ideal` if every
-            # day in the window is already at/over cap (window too small).
-            chosen_idx = ideal
+            # Search outward from `ideal` (deterministic offset order
+            # 0, +1, -1, +2, -2, ...) in tiers:
+            #   1) nearest day under cap AND not already holding this concept —
+            #      for a concept in a single exam this always matches first, so
+            #      single-exam scheduling is unchanged;
+            #   2) if none (a repeat of this concept from another exam), the
+            #      nearest day that just isn't already holding this concept
+            #      (relax the cap before ever duplicating a concept on a day);
+            #   3) degenerate fallback (window smaller than the concept count):
+            #      the ideal day.
+            course_id = exam["course_id"]
+            chosen_idx = None
             for off in _outward(n):
                 idx = ideal + off
-                if 0 <= idx < n and load.get((exam["course_id"], window[idx].isoformat()), 0) < cap:
-                    chosen_idx = idx
-                    break
+                if 0 <= idx < n:
+                    di = window[idx].isoformat()
+                    if load.get((course_id, di), 0) < cap and (concept_id, di) not in placed_concept_days:
+                        chosen_idx = idx
+                        break
+            if chosen_idx is None:
+                for off in _outward(n):
+                    idx = ideal + off
+                    if 0 <= idx < n and (concept_id, window[idx].isoformat()) not in placed_concept_days:
+                        chosen_idx = idx
+                        break
+            if chosen_idx is None:
+                chosen_idx = ideal
             d = window[chosen_idx].isoformat()
-            load[(exam["course_id"], d)] = load.get((exam["course_id"], d), 0) + 1
+            load[(course_id, d)] = load.get((course_id, d), 0) + 1
+            placed_concept_days.add((concept_id, d))
             items.append({
                 "semester_id": semester_id,
                 "course_id": exam["course_id"],

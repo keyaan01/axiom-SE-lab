@@ -10,11 +10,11 @@ import shutil
 import threading
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from .. import config, db
+from .. import auth, config, db
 from ..services import latex, office, storage
 
 router = APIRouter()
@@ -32,7 +32,7 @@ MAX_BYTES = 50 * 1024 * 1024
 _MAX_LAYOUT_BYTES = 2_000_000
 
 _PUBLIC_COLS = ("id, concept_id, kind, display_name, mime_type, size_bytes, "
-                "status, error_message, created_at")
+                "status, error_message, created_at, disk_uuid")
 
 
 class CanvasLayoutIn(BaseModel):
@@ -97,6 +97,71 @@ def put_canvas_layout(concept_id: int, payload: CanvasLayoutIn):
         return {"ok": True}
     finally:
         conn.close()
+
+
+@router.get("/canvas/text-index")
+def get_canvas_text_index(user: dict = Depends(auth.require_auth)):
+    """Build 14 Phase A: index of text-box/sticky-note text across every canvas
+    the requesting account owns, so global search can jump to it. Pen/shape
+    drawings carry no text and are skipped. Scoped like mindmap.py's graph
+    endpoint: canvas_layout -> concepts -> courses -> semesters WHERE
+    semesters.user_id = the logged-in account. Defensive: a malformed/empty
+    data_json row, or a drawing missing fields, is skipped rather than
+    raising — a bad row must never 500 the whole index.
+    """
+    conn = db.get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+              cl.concept_id AS concept_id,
+              cl.data_json AS data_json,
+              c.name AS concept_name,
+              co.id AS course_id,
+              co.name AS course_name
+            FROM canvas_layout cl
+            JOIN concepts c ON c.id = cl.concept_id
+            JOIN courses co ON co.id = c.course_id
+            JOIN semesters s ON s.id = co.semester_id
+            WHERE s.user_id = ?
+            """,
+            (user["id"],),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    items = []
+    for row in rows:
+        try:
+            data = json.loads(row["data_json"])
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        drawings = data.get("drawings")
+        if not isinstance(drawings, list):
+            continue
+        for drawing in drawings:
+            if not isinstance(drawing, dict):
+                continue
+            if drawing.get("type") not in ("text", "sticky"):
+                continue
+            drawing_id = drawing.get("id")
+            if not drawing_id:
+                continue
+            text = drawing.get("text")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            items.append({
+                "concept_id": row["concept_id"],
+                "course_id": row["course_id"],
+                "course_name": row["course_name"],
+                "concept_name": row["concept_name"],
+                "drawing_id": drawing_id,
+                "kind": drawing.get("type"),
+                "text": text[:300],
+            })
+    return {"items": items}
 
 
 def _mark_failed(file_id: int, message: str) -> None:

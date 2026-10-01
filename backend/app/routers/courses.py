@@ -17,6 +17,7 @@ router = APIRouter()
 COURSE_SELECT = """
     SELECT c.*,
       (SELECT COUNT(*) FROM materials m WHERE m.course_id = c.id) AS material_count,
+      (SELECT COUNT(*) FROM concepts cp WHERE cp.course_id = c.id) AS concept_count,
       (SELECT COUNT(*) FROM notes n WHERE n.course_id = c.id) AS note_count
     FROM courses c
 """

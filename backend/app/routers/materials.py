@@ -1,31 +1,43 @@
 """Study-material and past-question (PYQ) uploads.
 
-This build accepts only Gemini-native formats: PDF and common images. Files are
-streamed to disk under a UUID name (never the user's filename) with a size cap;
-the display name and metadata live in the database. PPTX/DOCX conversion is a
-later build.
+Accepts Gemini-native formats (PDF, common images) directly, plus Office
+documents (docx/pptx/doc/ppt) which are converted to PDF in the background via
+LibreOffice (mirrors routers/canvas.py's proven docx/pptx-> PDF pipeline) so
+extraction always sees a PDF/image, never an office file. Files are streamed to
+disk under a UUID name (never the user's filename) with a size cap; the
+display name and metadata live in the database.
 """
 import os
+import shutil
+import threading
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
-from .. import db
-from ..services import storage
+from .. import config, db
+from ..services import office, storage
 
 router = APIRouter()
 
 # Extension -> mime. Validation is by extension (reliable) rather than the
-# browser-supplied content type. These are all readable by the Gemini File API.
+# browser-supplied content type. PDF/image are readable by the Gemini File API
+# directly; office formats are converted to PDF before extraction ever sees
+# them (see _convert_office_material below).
 ALLOWED_EXT = {
     ".pdf": "application/pdf",
     ".png": "image/png",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".webp": "image/webp",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 }
+_OFFICE_EXT = {".doc", ".docx", ".ppt", ".pptx"}
 MAX_BYTES = 50 * 1024 * 1024  # 50 MB per file
 
-# Columns returned to the client (never expose disk_uuid / gemini internals).
-_PUBLIC_COLS = "id, course_id, kind, display_name, mime_type, size_bytes, created_at"
+# Columns returned to the client (never expose disk_uuid / pdf_disk_uuid).
+_PUBLIC_COLS = ("id, course_id, kind, display_name, mime_type, size_bytes, "
+                "status, error_message, created_at")
 
 
 def _require_course(conn, course_id: int) -> None:
@@ -62,7 +74,7 @@ async def upload_material(
     if ext not in ALLOWED_EXT:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file type '{ext or '?'}'. Allowed: PDF, PNG, JPG, WEBP.",
+            detail=f"Unsupported file type '{ext or '?'}'. Allowed: PDF, PNG, JPG, WEBP, Word, PowerPoint.",
         )
 
     conn = db.get_connection()
@@ -98,18 +110,79 @@ async def upload_material(
     finally:
         await file.close()
 
+    is_office = ext in _OFFICE_EXT
+    # image/pdf are usable immediately; office files need a background
+    # conversion pass before extraction can see them as a PDF.
+    status = "converting" if is_office else "ready"
+    pdf_disk_uuid = disk_uuid if ext == ".pdf" else None
+
     conn = db.get_connection()
     try:
         cur = conn.execute(
-            "INSERT INTO materials (course_id, kind, display_name, disk_uuid, mime_type, size_bytes) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (course_id, kind, display_name, disk_uuid, ALLOWED_EXT[ext], size),
+            "INSERT INTO materials (course_id, kind, display_name, disk_uuid, mime_type, "
+            "size_bytes, status, pdf_disk_uuid) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (course_id, kind, display_name, disk_uuid, ALLOWED_EXT[ext], size, status, pdf_disk_uuid),
         )
         conn.commit()
+        material_id = cur.lastrowid
         row = conn.execute(
-            f"SELECT {_PUBLIC_COLS} FROM materials WHERE id = ?", (cur.lastrowid,)
+            f"SELECT {_PUBLIC_COLS} FROM materials WHERE id = ?", (material_id,)
         ).fetchone()
-        return dict(row)
+        result = dict(row)
+    finally:
+        conn.close()
+
+    if is_office:
+        threading.Thread(
+            target=_convert_office_material, args=(material_id, course_id, dest), daemon=True
+        ).start()
+
+    return result
+
+
+def _convert_office_material(material_id: int, course_id: int, src_path: Path) -> None:
+    """Background: convert a docx/pptx/doc/ppt material to PDF.
+
+    Runs in its own thread with its own DB connection (mirrors
+    routers/canvas.py's _convert_canvas_file). On success the material's
+    pdf_disk_uuid points at the converted PDF (mime stays the original office
+    type; gather_course_attachments is the one place that decides which bytes
+    extraction actually sees). On failure the row is marked 'failed' with a
+    visible error_message — never fed to extraction.
+    """
+    work_dir = config.WORK_DIR / storage.new_uuid()
+    try:
+        converted = office.convert_to_pdf(src_path, work_dir)
+        upload_dir = storage.course_upload_dir(course_id)
+        pdf_uuid = storage.new_uuid() + ".pdf"
+        pdf_dest = upload_dir / pdf_uuid
+        shutil.move(str(converted), str(pdf_dest))
+
+        conn = db.get_connection()
+        try:
+            conn.execute(
+                "UPDATE materials SET status='ready', pdf_disk_uuid=?, error_message=NULL WHERE id=?",
+                (pdf_uuid, material_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except office.OfficeError as e:
+        _mark_material_failed(material_id, str(e))
+    except Exception as e:
+        _mark_material_failed(material_id, f"{type(e).__name__}: {e}")
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
+def _mark_material_failed(material_id: int, message: str) -> None:
+    conn = db.get_connection()
+    try:
+        conn.execute(
+            "UPDATE materials SET status='failed', error_message=? WHERE id=?",
+            (message, material_id),
+        )
+        conn.commit()
     finally:
         conn.close()
 
@@ -119,7 +192,7 @@ def delete_material(material_id: int):
     conn = db.get_connection()
     try:
         row = conn.execute(
-            "SELECT course_id, disk_uuid FROM materials WHERE id = ?", (material_id,)
+            "SELECT course_id, disk_uuid, pdf_disk_uuid FROM materials WHERE id = ?", (material_id,)
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Material not found")
@@ -128,8 +201,11 @@ def delete_material(material_id: int):
     finally:
         conn.close()
     # Best-effort file removal (DB row is already gone).
-    try:
-        (storage.course_upload_dir(row["course_id"]) / row["disk_uuid"]).unlink(missing_ok=True)
-    except Exception:
-        pass
+    upload_dir = storage.course_upload_dir(row["course_id"])
+    for uuid_name in (row["disk_uuid"], row["pdf_disk_uuid"]):
+        if uuid_name:
+            try:
+                (upload_dir / uuid_name).unlink(missing_ok=True)
+            except Exception:
+                pass
     return {"ok": True}
